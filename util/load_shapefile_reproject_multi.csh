@@ -13,7 +13,7 @@ set srid=900921
 set newfield=geom_${srid}          # geom_90021
 set org_geom_field=wkb_geometry
 
-set shpdir=$SA_HOME/data/shapefiles/
+set shpdir=$SRG_HOME/data/shapefiles/
 ### Load county shapefile
 set indir=$shpdir/Census
 set shapefile=cb_2014_us_county_500k_Poly
