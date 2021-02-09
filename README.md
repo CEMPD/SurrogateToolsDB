@@ -1,5 +1,5 @@
 # Surrogate Tools DB Quickstart Guide
-Last updated: 11/30/2020
+Last updated: 2/9/2021
 
 Note that Surrogate Tools DB currently only supports creating surrogates for regular grids. For E-Grid or census track (polygon) surrogates, please use the Spatial Allocator (https://www.cmascenter.org/sa-tools/).
 
@@ -102,3 +102,23 @@ Note that Surrogate Tools DB currently only supports creating surrogates for reg
    ./bin/64bits/diffsurr.exe outputs/us12k_516x444/USA_100_NOFILL.txt 100 outputs/us12k_516x444_example/USA_100_NOFILL.txt 100 0.000001
    ```
    If the newly generated surrogates match the sample outputs, you'll see the message "The surrogate comparison was successful!"
+
+## How-Tos
+
+### Using a different grid with the same projection
+
+1. Update the script util/generate_modeling_grid.sh to define the new grid parameters.
+2. Update control_variables_pg.csv to set the grid name, output directory, and log file name.
+3. Generate the surrogates.
+
+### If the grid is on a new projection
+
+1. Add the projection to the database. The script util/create_900921.sql shows how the LAM_40N97W projection used in the CONUS domains is created. The srid field for the new projection needs to be unique in the database.
+2. Load the shapefiles using the new projection. Existing shapefile tables need to be deleted (or renamed). Update the script util/load_shapefile_reproject_multi.csh with the new srid number.
+3. Update the script util/generate_modeling_grid.sh to define the new grid parameters, making sure to set the projection.
+4. Update control_variables_pg.csv to set the grid name, output directory, and log file name.
+5. Generate the surrogates.
+
+### Using non-rectangular grids
+
+For non-rectangular grids, as long as the polygons are defined in a table similar to the one created by util/generate_modeling_grid.sh, things should work.
