@@ -1,5 +1,5 @@
 # Surrogate Tools DB Quickstart Guide
-Last updated: 2/9/2021
+Last updated: 2/18/2021
 
 Note that Surrogate Tools DB currently only supports creating surrogates for regular grids. For E-Grid or census track (polygon) surrogates, please use the Spatial Allocator (https://www.cmascenter.org/sa-tools/).
 
@@ -122,3 +122,7 @@ Note that Surrogate Tools DB currently only supports creating surrogates for reg
 ### Using non-rectangular grids
 
 For non-rectangular grids, as long as the polygons are defined in a table similar to the one created by util/generate_modeling_grid.sh, things should work.
+
+### Download additional shapefiles
+
+Archives containing all the shapefiles used in EPA's 2016 and 2017 emissions modeling platforms are available for download at https://drive.google.com/drive/folders/1idGoi6I3GvKFCcf87O_8zMirM7Gtd0_E
