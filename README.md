@@ -77,7 +77,7 @@ Note that Surrogate Tools DB currently only supports creating surrogates for reg
    | OUTPUT DIRECTORY | ./outputs/us12k_516x444 | Directory for individual surrogate files |
    | LOG FILE NAME | ./LOGS/srg_12US3.log | Log file to store all information from running the program |
 
-   - surrogate_generation_pg.csv: Specifies which surrogates will be created. For this guide, only the population surragate (code 100) will be generated.
+   - surrogate_generation_pg.csv: Specifies which surrogates will be created. For this guide, only the population surrogate (code 100) will be generated.
    
    - surrogate_specification_pg.csv: Details how each surrogate should be created, including which data and weight shapefiles should be used, which attributes to use, and any weighting or filtering functions that should be applied.
 
