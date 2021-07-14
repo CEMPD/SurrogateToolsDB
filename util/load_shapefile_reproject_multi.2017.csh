@@ -20,14 +20,14 @@ set shapefile=cb_2017_us_county_500k
 set table=`echo $shapefile | tr "[:upper:]" "[:lower:]"`
 set attr=""
 set geomtype=MultiPolygon          # retrieve the exact geopmetry type from the table.
-#source load_shapefile.csh
+source load_shapefile.csh
 
 ### Load population and housing shapefile, and calculate density
 #set shapefile=ACS_2014_5YR_PopHousing
 set shapefile=acs2016_5yr_bg
 set table=`echo $shapefile | tr "[:upper:]" "[:lower:]"`
 set geomtype=MultiPolygon          # retrieve the exact geopmetry type from the table.
-#source load_shapefile.csh
+source load_shapefile.csh
 
 ### Load FEMA
 set indir=$shpdir/FEMA
@@ -35,7 +35,7 @@ set shapefile=fema_bsf_2002bnd
 set table=`echo $shapefile | tr "[:upper:]" "[:lower:]"`
 set attr=""
 set geomtype=MultiPolygon       # retrieve the exact geopmetry type from the table.
-source load_shapefile.csh
+#source load_shapefile.csh
 
 ### Load hpms shapefile, transfer column move2014 to integer
 set indir=$shpdir/HPMS
