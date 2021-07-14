@@ -126,3 +126,9 @@ For non-rectangular grids, as long as the polygons are defined in a table simila
 ### Download additional shapefiles
 
 Archives containing all the shapefiles used in EPA's 2016 and 2017 emissions modeling platforms are available for download at https://drive.google.com/drive/folders/1idGoi6I3GvKFCcf87O_8zMirM7Gtd0_E
+
+### Generate surrogates using EPA's 2017 emissions modeling platform shapefiles
+
+1. When loading the shapefiles, use the script util/load_shapefile_reproject_multi.2017.csh
+2. Update the settings file control_variables_pg.2017.csv if needed
+3. Run the script run_pg_srgcreate.2017.csh
