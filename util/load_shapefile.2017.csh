@@ -19,7 +19,7 @@ ALTER TABLE $schema.$table ADD COLUMN $newfield geometry($geomtype, $srid);
 -- CREATE INDEX ON $schema.$table USING GIST ($newfield);
 DROP INDEX if exists $schema.${table}_${org_geom_field}_geom_idx;
 DROP INDEX if exists $schema.${table}_${newfield}_idx;
-UPDATE $schema.$table SET $newfield = ST_Transform($org_geom_field, $srid);
+UPDATE $schema.$table SET $newfield = ST_Multi(ST_Transform($org_geom_field, $srid));
 CREATE INDEX on $schema.${table} using GIST(geom_$srid );
 END1
 
