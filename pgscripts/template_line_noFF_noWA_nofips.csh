@@ -131,7 +131,7 @@ echo "Exporting surrogates $schema.surg_${surg_code}_${grid}; "
 echo "#GRID" > ${output_dir}/USA_${surg_code}_NOFILL.txt
 $PGBIN/psql -h $server -d $dbname -U $user --field-separator '	' -t --no-align ${dbname} << END >> ${output_dir}/USA_${surg_code}_NOFILL.txt
 
-SELECT surg_code, ${data_attribute}, colnum, rownum, surg, '!', numer, denom
+SELECT surg_code, ${data_attribute}, colnum, rownum, ROUND(surg::NUMERIC, 10), '!', numer, denom
   FROM $schema.surg_${surg_code}_${grid}
   order by ${data_attribute}, colnum, rownum;
 END
