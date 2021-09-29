@@ -2,7 +2,7 @@ SHAPEFILE NAME,DIRECTORY,ELLIPSOID,PROJECTION,DESCRIPTION,DATA SOURCE,QUESTION
 cb_2017_us_county_500k,public,"datum=NAD83","proj=lcc,+lat_1=33,+lat_2=45,+lat_0=40,+lon_0=-97",2017 US Census county boundaries at 5km resolution for onshore locations only,,
 NTAD_2017_County_Pol,public,"datum=WGS84",proj=latlong,2014 Bureau of Transportation Stats county boundaries extending to offshore political boundaries ( set ctfips='46102' where  ctfips='46113'),,
 acs2016_5yr_bg,public,"datum=NAD83",proj=latlong,2016 US Census American Community Survey 5-year product with population and housing related features,,
-hpms2016,public,"datum=WGS84","proj=latlong",,,
+hpms2017_v3_04052020,public,"datum=WGS84","proj=latlong",,,
 ntad_2016_ipcd,public,"datum=WGS84","proj=latlong",,,
 TIGER_2014_Rail,public,"datum=NAD83",proj=latlong,2014 TIGER Line rail,,
 NTAD_2014_Rail,public,"datum=WGS84",proj=latlong,2016 National Transportation Atlas Line rail,,
