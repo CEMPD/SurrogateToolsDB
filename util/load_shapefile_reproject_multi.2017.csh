@@ -23,7 +23,6 @@ set geomtype=MultiPolygon          # retrieve the exact geopmetry type from the 
 source load_shapefile.2017.csh
 
 ### Load population and housing shapefile, and calculate density
-#set shapefile=ACS_2014_5YR_PopHousing
 set shapefile=acs2016_5yr_bg
 set table=`echo $shapefile | tr "[:upper:]" "[:lower:]"`
 set geomtype=MultiPolygon          # retrieve the exact geopmetry type from the table.
@@ -49,13 +48,6 @@ set geomtype=MultiLineString     # retrieve the exact geopmetry type from the ta
 set indir=$shpdir/PIL
 #set shapefile=pil_2018_08_17
 set shapefile=pil_2019_06_24
-set table=`echo $shapefile | tr "[:upper:]" "[:lower:]"`
-set geomtype=MultiPoint       # retrieve the exact geopmetry type from the table.
-#source load_shapefile.2017.csh
-
-# 275
-set indir=$shpdir/2010
-set shapefile=ERTAC_railyard_WRF
 set table=`echo $shapefile | tr "[:upper:]" "[:lower:]"`
 set geomtype=MultiPoint       # retrieve the exact geopmetry type from the table.
 #source load_shapefile.2017.csh
@@ -121,17 +113,9 @@ set geomtype=MultiPoint
 #source load_shapefile.2017.csh
 
 set indir=$shpdir/POI
-#set shapefile=POI_Factory_2015_GolfCourses
 set shapefile=usa_golf_courses_2019_10
 set table=`echo $shapefile | tr "[:upper:]" "[:lower:]"`
 set geomtype=MultiPoint 
-#source load_shapefile.2017.csh
-
-set indir=$shpdir/US 
-set shapefile=US_Airports_NEI08v2_WRF
-set table=`echo $shapefile | tr "[:upper:]" "[:lower:]"`
-set attr="total_emis"
-set geomtype=MultiPoint
 #source load_shapefile.2017.csh
 
 set indir=$shpdir/US
@@ -157,22 +141,10 @@ set attr="TOTAL_EX_1"
 set geomtype=MultiPolygon    # retrieve the exact geopmetry type from the table.
 #source load_shapefile.2017.csh
 
-set shapefile=AllProductionWells  # 676 TOTAL_PR_1
-set table=`echo $shapefile | tr "[:upper:]" "[:lower:]"`
-set geomtype=MultiPolygon    # retrieve the exact geopmetry type from the table.
-set attr="TOTAL_PR_1"
-#source load_shapefile.2017.csh
-
 set shapefile=AllWells   # 693 TOTAL_WE_1
 set table=`echo $shapefile | tr "[:upper:]" "[:lower:]"`
 set geomtype=MultiPolygon    # retrieve the exact geopmetry type from the table.
 set attr="TOTAL_WE_1"
-#source load_shapefile.2017.csh
-
-set shapefile=AssocGasProduction # 672 ASSOCIAT_1
-set table=`echo $shapefile | tr "[:upper:]" "[:lower:]"`
-set geomtype=MultiPolygon    # retrieve the exact geopmetry type from the table.
-set attr="ASSOCIAT_1"
 #source load_shapefile.2017.csh
 
 set shapefile=CBMProduction  # 699 CBM_PROD_1
@@ -187,12 +159,6 @@ set geomtype=MultiPolygon    # retrieve the exact geopmetry type from the table.
 set attr="CBM_WELLS1"
 #source load_shapefile.2017.csh
 
-set shapefile=Completions_All  # 686 COMPLETI_1
-set table=`echo $shapefile | tr "[:upper:]" "[:lower:]"`
-set geomtype=MultiPolygon         # retrieve the exact geopmetry type from the table.
-set attr="COMPLETI_1"
-#source load_shapefile.2017.csh
-
 set shapefile=Completions_CBM  # 679 COMPLETI_1
 set table=`echo $shapefile | tr "[:upper:]" "[:lower:]"`
 set geomtype=MultiPolygon         # retrieve the exact geopmetry type from the table.
@@ -203,18 +169,6 @@ set shapefile=Completions_Oil  # 685 COMPLETI_1
 set table=`echo $shapefile | tr "[:upper:]" "[:lower:]"`
 set geomtype=MultiPolygon         # retrieve the exact geopmetry type from the table.
 set attr="COMPLETI_1"
-#source load_shapefile.2017.csh
-
-set shapefile=CondensateCBMProd # 673 CONDENSA_1
-set table=`echo $shapefile | tr "[:upper:]" "[:lower:]"`
-set geomtype=MultiPolygon         # retrieve the exact geopmetry type from the table.
-set attr="CONDENSA_1"
-#source load_shapefile.2017.csh
-
-set shapefile=CondensateGasProd  # 697 CONDENSA_1
-set table=`echo $shapefile | tr "[:upper:]" "[:lower:]"`
-set geomtype=MultiPolygon         # retrieve the exact geopmetry type from the table.
-set attr="CONDENSA_1"
 #source load_shapefile.2017.csh
 
 set shapefile=FeetDrilled_All  # 687 FEET_DRI_1
@@ -303,4 +257,3 @@ set table=`echo $shapefile | tr "[:upper:]" "[:lower:]"`
 set geomtype=MultiPolygon          # retrieve the exact geopmetry type from the table.
 set attr=""
 #source load_shapefile.2017.csh
-

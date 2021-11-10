@@ -8,9 +8,7 @@
 setenv shp_tbl `echo $shapefile | tr "[:upper:]" "[:lower:]"`
 
 echo $shapefile
-#if ( $shp_tbl == "acs_2014_5yr_pophousing" ) then
-#$GDALBIN/ogr2ogr -f "PostgreSQL" "PG:dbname=$dbname user=$user host=$server" $indir/$shapefile.shp -lco PRECISION=NO -nlt PROMOTE_TO_MULTI -nln $schema.$table -overwrite
-ogr2ogr -f "PostgreSQL" "PG:dbname=$dbname user=$user host=$server" $indir/$shapefile.shp -lco PRECISION=NO -nlt PROMOTE_TO_MULTI -nln $schema.$table -overwrite
+$GDALBIN/ogr2ogr -f "PostgreSQL" "PG:dbname=$dbname user=$user host=$server" $indir/$shapefile.shp -lco PRECISION=NO -nlt PROMOTE_TO_MULTI -nln $schema.$table -overwrite
 echo "Finished loading shapefile: " $indir/$shapefile.shp
 
 # 2. Tranform to a new projection (from original to new 900921/900915) and create gist index on it
@@ -33,22 +31,7 @@ END1
 #UPDATE $schema.$table SET $newfield = ST_Buffer($newfield, 0.0);
 #DROP INDEX if exists $schema.${table}_${org_geom_field}_geom_idx;
 
-# Create ntad_2017_county_pol based on 2014
-if ( $table == "ntad_2014_county_pol" ) then
-$PGBIN/psql -h $server -U $user -q $dbname << END1
-  DROP TABLE  ntad_2017_county_pol;
-  CREATE TABLE ntad_2017_county_pol as select * FROM ntad_2014_county_pol;
-  UPDATE ntad_2017_county_pol set ctfips='46102' WHERE  ctfips='46113';
-  UPDATE $schema.$table SET $newfield = ST_Transform($org_geom_field, $srid);
-  UPDATE $schema.$table SET $newfield = ST_Buffer($newfield, 0.0);
-  DROP INDEX if exists $schema.${table}_${org_geom_field}_geom_idx;
-  DROP INDEX if exists $schema.${table}_${newfield}_idx;
-  CREATE INDEX on $schema.${table} using GIST(geom_$srid );
-END1
-endif
-
 # add columns
-#if ( $table == "hpms2016" ||  $table == "hpms2017_update" ) then
 if ( $table == "hpms2016" ||  $table == "hpms2017_v3_04052020" ) then
 $PGBIN/psql -h $server -U $user -q $dbname << END1
   ALTER TABLE $schema.$table ALTER COLUMN moves2014 TYPE INT USING moves2014::integer;
@@ -72,69 +55,7 @@ END1
 endif
 
 
-#
-#if ( $table == "ntad_2014_ipcd" ) then
-#psql  -h $server -U $user -q $dbname << END1
-#  ALTER TABLE $schema.$table RENAME pt_id_lon TO longitude;
-#  ALTER TABLE $schema.$table RENAME pt_id_lat TO latitude;
-#END1
-#endif
-
-#if ( $table == "poi_factory_2015_golfcourses" ) then
-#psql  -h $server -U $user -q $dbname << END1
-#  ALTER TABLE $schema.$table RENAME lon TO longitude;
-#  ALTER TABLE $schema.$table RENAME lat TO latitude;
-#END1
-#endif
-#if ( $table == "ertac_railyard_wrf" ) then
-#psql -h $server -U $user -q $dbname << END1
-#  ALTER TABLE $schema.$table RENAME lon TO longitude;
-#  ALTER TABLE $schema.$table RENAME lat TO latitude;
-#END1
-#endif
-
-
 # Calculate density
-if ( $table == "acs_2014_5yr_pophousing" ) then
-$PGBIN/psql -h $server -U $user -q $dbname << END1
-  ALTER TABLE $schema.$table
-        add column area_$srid double precision,
-        add column pop2014_dens_${srid} double precision,
-        add column hu2014_dens_${srid} double precision,
-        add column popch14_10_dens_${srid} double precision,
-        add column huch14_10_dens_${srid} double precision,
-        add column pop2010_dens_${srid} double precision,
-        add column hu2010_dens_${srid} double precision,
-        add column pop2000_dens_${srid} double precision,
-        add column hu2000_dens_${srid} double precision,
-        add column util_gas_dens_${srid} double precision,
-        add column wood_dens_${srid} double precision,
-        add column fuel_oil_dens_${srid} double precision,
-        add column coal_dens_${srid} double precision,
-        add column lp_gas_dens_${srid} double precision,
-        add column elec_dens_${srid} double precision,
-        add column solar_dens_${srid} double precision;
-  update $schema.$table
-        set area_$srid =ST_Area(geom_$srid );
-  update $schema.$table set
-        pop2014_dens_${srid}=pop2014 / area_$srid ,
-        hu2014_dens_${srid}=hu2014 / area_$srid ,
-        popch14_10_dens_${srid}=popch14_10 / area_$srid 
-        huch14_10_dens_${srid}=huch14_10 / area_$srid ,
-        pop2010_dens_${srid}=pop2010 / area_$srid ,
-        hu2010_dens_${srid}=hu2010 / area_$srid ,
-        pop2000_dens_${srid}=pop2000 / area_$srid ,
-        hu2000_dens_${srid}=hu2000 / area_$srid ,
-        util_gas_dens_${srid}=util_gas / area_$srid ,
-        wood_dens_${srid}=wood / area_$srid ,
-        fuel_oil_dens_${srid}=fuel_oil / area_$srid ,
-        coal_dens_${srid}=coal / area_$srid ,
-        lp_gas_dens_${srid}=lp_gas / area_$srid ,
-        elec_dens_${srid}=elec / area_$srid ,
-        solar_dens_${srid}=solar / area_$srid ;
-END1
-endif
-
 if ( $table == "acs2016_5yr_bg" ) then
 $PGBIN/psql -h $server -U $user -q $dbname << END1
   ALTER TABLE $schema.$table
@@ -226,6 +147,3 @@ psql -h $server -U $user -q $dbname << END1
         ${attr}_dens_${srid}=${attr}/area_$srid ;
 END1
 endif
-
-
-
