@@ -1,0 +1,3 @@
+REGION,SURROGATE,SURROGATE CODE,GENERATE,QUALITY ASSURANCE,PG SCRIPT
+USA,Population,100,YES,YES,template_polygon_noFF_withWA.csh
+USA,Housing,110,NO,YES,template_polygon_noFF_withWA.csh
