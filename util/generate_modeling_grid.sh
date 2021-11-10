@@ -13,20 +13,6 @@
  user=$PG_USER
 
 ######################################################################
-#'CONUS36KM_172x148'
-#'LAM_40N97W' -2952000 -2772000 36000 36000 172 148 1
-
-#tblname='conus36k_172x148'	# name of table in schema
-
-# proj=900921			# value of srid in spatial_ref_sys data table
-# xorig=-2952000		# x-coordinate of lower-left corner (LLC) of grid 
-# yorig=-2772000		# y-coordinate of LLC of grid
-# xcellsize=36000		# cell size in x-direction
-# ycellsize=36000		# cell size in y-direction
-# cols=172			# number of columns (x)
-# rows=148			# number of rows (y)
-
-######################################################################
 # Same domain as 36US3, CONUS36KM_172x148
 #'us12k_516x444'
 #'LAM_40N97W' -2952000 -2772000 36000 36000 516 444 1
@@ -54,6 +40,20 @@ rows=444                      # number of rows (y)
 # ycellsize=12000			# cell size in y-direction
 # cols=444			# number of columns (x)
 # rows=336			# number of rows (y)
+
+######################################################################
+#'4US3'
+#'LAM_40N97W' -2952000.000  -2772000.000      4000.000      4000.000 1548 1332   1
+
+#tblname='us4k_1548x1332'       # name of table in schema
+
+#proj=900921                    # value of srid in spatial_ref_sys data table
+#xorig=-2952000                 # x-coordinate of lower-left corner (LLC) of grid
+#yorig=-2772000                 # y-coordinate of LLC of grid
+#xcellsize=4000                 # cell size in x-direction
+#ycellsize=4000                 # cell size in y-direction
+#cols=1548                      # number of columns (x)
+#rows=1332                      # number of rows (y)
 
 ######################################################################
 #'us4k'
