@@ -31,6 +31,7 @@
 #SRGDESC=500,Commercial Land
 #SRGDESC=505,Industrial Land
 #SRGDESC=506,Education
+#SRGDESC=508,Public Schools
 #SRGDESC=510,Commercial plus Industrial
 #SRGDESC=535,Residential + Commercial + Industrial + Institutional + Government
 #SRGDESC=560,Hospital (COM6)

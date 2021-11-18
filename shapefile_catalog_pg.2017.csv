@@ -1,5 +1,6 @@
 SHAPEFILE NAME,DIRECTORY,ELLIPSOID,PROJECTION,DESCRIPTION,DATA SOURCE,QUESTION
 cb_2017_us_county_500k,public,"datum=NAD83","proj=lcc,+lat_1=33,+lat_2=45,+lat_0=40,+lon_0=-97",2017 US Census county boundaries at 5km resolution for onshore locations only,,
+tl2019Counties_LCC_WRF,public,,,,,
 NTAD_2017_County_Pol,public,"datum=WGS84",proj=latlong,2014 Bureau of Transportation Stats county boundaries extending to offshore political boundaries ( set ctfips='46102' where  ctfips='46113'),,
 acs2016_5yr_bg,public,"datum=NAD83",proj=latlong,2016 US Census American Community Survey 5-year product with population and housing related features,,
 hpms2017_v3_04052020,public,"datum=WGS84","proj=latlong",,,
@@ -33,6 +34,7 @@ GasWell_Counts,public,"Unknown","proj=lcc,+lat_1=33,+lat_2=45,+lat_0=40,+lon_0=-
 ProducedWater_All,public,"Unknown","proj=lcc,+lat_1=33,+lat_2=45,+lat_0=40,+lon_0=-97",US Oil and Gas activity for the NEI2014,,
 airport_area,public,"D_Sphere_ARC_INFO","proj=lcc,+lat_1=33,+lat_2=45,+lat_0=40,+lon_0=-97",Areas for commercial airports plus runways,ESRI CD,
 fema_bsf_2002bnd,public,"Sphere","proj=lcc,+lat_1=33,+lat_2=45,+lat_0=40,+lon_0=-97",FEMA Building Square Footage,FEMA HAZUS 2004,2002 Census Block Groups
+public_schools_2018_2019,public,,,,,
 GulfofMexico_SupportVessels_Density_WRF,public,"+a=6370000.0,+b=6370000.0","proj=lcc,+lat_1=33,+lat_2=45,+lat_0=40,+lon_0=-97",Gulf of Mexico Federal Waters support vessel densities,Eastern Researh Group,
 CMV_2013_Vessel_Density_CONUS1km,public,"+a=6370000.0,+b=6370000.0","proj=lcc,+lat_1=33,+lat_2=45,+lat_0=40,+lon_0=-97",2013 shipping density at 1.33 km resolution,marinecadastre.gov 2013 total density,
 ShippingLanes_2014NEI,public,"datum=NAD83","proj=eqdc,+lat_1=20,+lat_2=60,+lat_0=40,+lon_0=-96,+x_0=0,+y_0=0",Offshore shipping lanes with activity from the NEI2014,,

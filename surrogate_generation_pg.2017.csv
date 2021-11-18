@@ -31,6 +31,7 @@ USA,NLCD Water,350,NO,NO,template_polygon_withFF_noWA.csh
 USA,Commercial Land,500,NO,NO,template_polygon_noFF_withWA.csh
 USA,Industrial Land,505,NO,NO,template_polygon_noFF_withWA.csh
 USA,Education,506,NO,NO,template_polygon_noFF_withWA.csh
+USA,Public Schools,508,NO,NO,template_point_noFF_withWA.csh
 USA,Commercial plus Industrial,510,NO,NO,template_polygon_noFF_withWA.csh
 USA,Residential + Commercial + Industrial + Institutional + Government,535,NO,NO,template_polygon_noFF_withWA.csh
 USA,Hospital (COM6),560,NO,NO,template_polygon_noFF_withWA.csh

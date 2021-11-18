@@ -22,6 +22,12 @@ set attr=""
 set geomtype=MultiPolygon          # retrieve the exact geopmetry type from the table.
 source load_shapefile.2017.csh
 
+set indir=$shpdir/US
+set shapefile=tl2019Counties_LCC_WRF
+set table=`echo $shapefile | tr "[:upper:]" "[:lower:]"`
+set geomtype=MultiPolygon
+source load_shapefile.2017.csh
+
 ### Load population and housing shapefile, and calculate density
 set shapefile=acs2016_5yr_bg
 set table=`echo $shapefile | tr "[:upper:]" "[:lower:]"`
@@ -58,6 +64,13 @@ set shapefile=NTAD_2016_ipcd
 #set shapefile=Intermodal_Passenger_Connectivity_Database_IPCD
 set table=`echo $shapefile | tr "[:upper:]" "[:lower:]"`
 set geomtype=MultiPoint       # retrieve the exact geopmetry type from the table.
+source load_shapefile.2017.csh
+
+### Load public schools shapefile for surrogate 508
+set indir=$shpdir/NCES
+set shapefile=public_schools_2018_2019
+set table=`echo $shapefile | tr "[:upper:]" "[:lower:]"`
+set geomtype=MultiPoint
 source load_shapefile.2017.csh
 
 ###  Load Waterway shapefile for surrogates 807
