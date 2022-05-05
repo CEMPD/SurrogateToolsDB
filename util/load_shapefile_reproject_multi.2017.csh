@@ -147,113 +147,167 @@ set geomtype=MultiPolygon
 source load_shapefile.2017.csh
 
 ### Load Oil Gas shapefile
-set indir=$shpdir/OilGas
-set shapefile=AllExploratoryWells # 677 TOTAL_EX_1
+set indir=$shpdir/OilGas_2016
+set shapefile=ASSOCIATED_GAS_PRODUCTION_CONUS_2016 # 672
 set table=`echo $shapefile | tr "[:upper:]" "[:lower:]"`
-set attr="TOTAL_EX_1"
-set geomtype=MultiPolygon    # retrieve the exact geopmetry type from the table.
+set attr="ACTIVITY"
+set geomtype=MultiPolygon
 source load_shapefile.2017.csh
 
-set shapefile=AllWells   # 693 TOTAL_WE_1
+set shapefile=CBM_PRODUCTION_CONUS_2016 # 673, 699
 set table=`echo $shapefile | tr "[:upper:]" "[:lower:]"`
-set geomtype=MultiPolygon    # retrieve the exact geopmetry type from the table.
-set attr="TOTAL_WE_1"
+set attr="ACTIVITY"
+set geomtype=MultiPolygon
 source load_shapefile.2017.csh
 
-set shapefile=CBMProduction  # 699 CBM_PROD_1
+set shapefile=CBM_WELLS_CONUS_2016 # 691
 set table=`echo $shapefile | tr "[:upper:]" "[:lower:]"`
-set geomtype=MultiPolygon    # retrieve the exact geopmetry type from the table.
-set attr="CBM_PROD_1"
+set attr="ACTIVITY"
+set geomtype=MultiPolygon
 source load_shapefile.2017.csh
 
-set shapefile=CBMWell_Counts  # 691 CBM_WELLS1
+set shapefile=COMPLETIONS_ALL_CONUS_2016 # 686
 set table=`echo $shapefile | tr "[:upper:]" "[:lower:]"`
-set geomtype=MultiPolygon    # retrieve the exact geopmetry type from the table.
-set attr="CBM_WELLS1"
+set attr="ACTIVITY"
+set geomtype=MultiPolygon
 source load_shapefile.2017.csh
 
-set shapefile=Completions_CBM  # 679 COMPLETI_1
+set shapefile=COMPLETIONS_CBM_CONUS_2016 # 679
 set table=`echo $shapefile | tr "[:upper:]" "[:lower:]"`
-set geomtype=MultiPolygon         # retrieve the exact geopmetry type from the table.
-set attr="COMPLETI_1"
+set attr="ACTIVITY"
+set geomtype=MultiPolygon
 source load_shapefile.2017.csh
 
-set shapefile=Completions_Oil  # 685 COMPLETI_1
+set shapefile=COMPLETIONS_GAS_CONUS_2016 # 678
 set table=`echo $shapefile | tr "[:upper:]" "[:lower:]"`
-set geomtype=MultiPolygon         # retrieve the exact geopmetry type from the table.
-set attr="COMPLETI_1"
+set attr="ACTIVITY"
+set geomtype=MultiPolygon
 source load_shapefile.2017.csh
 
-set shapefile=FeetDrilled_All  # 687 FEET_DRI_1
+set shapefile=COMPLETIONS_OIL_CONUS_2016 # 685
 set table=`echo $shapefile | tr "[:upper:]" "[:lower:]"`
-set geomtype=MultiPolygon         # retrieve the exact geopmetry type from the table.
-set attr="FEET_DRI_1"
+set attr="ACTIVITY"
+set geomtype=MultiPolygon
 source load_shapefile.2017.csh
 
-set shapefile=GasProduction  # 696 GAS_PROD_1
+set shapefile=COMPLETIONS_UNCONVENTIONAL_CONUS_2016 # 674
 set table=`echo $shapefile | tr "[:upper:]" "[:lower:]"`
-set geomtype=MultiPolygon         # retrieve the exact geopmetry type from the table.
-set attr="GAS_PROD_1"
+set attr="ACTIVITY"
+set geomtype=MultiPolygon
 source load_shapefile.2017.csh
 
-set shapefile=Spud_Count_All_20161111  # 692 SPUD_COU_1
+set shapefile=CONDENSATE_CBM_PRODUCTION_CONUS_2016 # 673
 set table=`echo $shapefile | tr "[:upper:]" "[:lower:]"`
-set geomtype=MultiPolygon         # retrieve the exact geopmetry type from the table.
-set attr="SPUD_COU_1"
+set attr="ACTIVITY"
+set geomtype=MultiPolygon
 source load_shapefile.2017.csh
 
-set shapefile=GasWell_Counts  # 698 GAS_WELL_1
+set shapefile=CONDENSATE_GAS_PRODUCTION_CONUS_2016 # 697
 set table=`echo $shapefile | tr "[:upper:]" "[:lower:]"`
-set geomtype=MultiPolygon       # retrieve the exact geopmetry type from the table.
-set attr="GAS_WELL_1"
+set attr="ACTIVITY"
+set geomtype=MultiPolygon
 source load_shapefile.2017.csh
 
-set shapefile=OilProduction   # 694 OIL_PROD_1
+set shapefile=FEET_DRILLED_CONUS_2016 # 687
 set table=`echo $shapefile | tr "[:upper:]" "[:lower:]"`
-set attr="OIL_PROD_1"
-set geomtype=MultiPolygon       # retrieve the exact geopmetry type from the table.
+set attr="ACTIVITY"
+set geomtype=MultiPolygon
 source load_shapefile.2017.csh
 
-set shapefile=OilWell_Counts_20161111  # 695 OIL_WELL_1
+set shapefile=GAS_PRODUCTION_CONUS_2016 # 672, 689, 696, 697
 set table=`echo $shapefile | tr "[:upper:]" "[:lower:]"`
-set attr="OIL_WELL_1"
-set geomtype=MultiPolygon       # retrieve the exact geopmetry type from the table.
+set attr="ACTIVITY"
+set geomtype=MultiPolygon
 source load_shapefile.2017.csh
 
-set shapefile=ProducedWater_All  # 683 PRODUCED_1
+set shapefile=GAS_WELLS_CONUS_2016 # 698
 set table=`echo $shapefile | tr "[:upper:]" "[:lower:]"`
-set attr="PRODUCED_1"
-set geomtype=MultiPolygon       # retrieve the exact geopmetry type from the table.
+set attr="ACTIVITY"
+set geomtype=MultiPolygon
 source load_shapefile.2017.csh
 
-set shapefile=SpudCount_CBM  # 670, SPUD_COU_1
+set shapefile=OIL_PRODUCTION_CONUS_2016 # 684
 set table=`echo $shapefile | tr "[:upper:]" "[:lower:]"`
-set geomtype=MultiPolygon       # retrieve the exact geopmetry type from the table.
-set attr="SPUD_COU_1"
+set attr="ACTIVITY"
+set geomtype=MultiPolygon
 source load_shapefile.2017.csh
 
-set shapefile=SpudCount_Gas  #671 SPUD_COU_1
+set shapefile=OIL_WELLS_CONUS_2016 # 695
 set table=`echo $shapefile | tr "[:upper:]" "[:lower:]"`
-set geomtype=MultiPolygon       # retrieve the exact geopmetry type from the table.
-set attr="SPUD_COU_1"
+set attr="ACTIVITY"
+set geomtype=MultiPolygon
 source load_shapefile.2017.csh
 
-set shapefile=SpudCount_HF  # 674 SPUD_HF_21
+set shapefile=PRODUCED_WATER_ALL_CONUS_2016 # 683
 set table=`echo $shapefile | tr "[:upper:]" "[:lower:]"`
-set geomtype=MultiPolygon       # retrieve the exact geopmetry type from the table.
-set attr="SPUD_HF_21"
+set attr="ACTIVITY"
+set geomtype=MultiPolygon
 source load_shapefile.2017.csh
 
-set shapefile=SpudCount_Oil # 681 SPUD_COU_1
+set shapefile=PRODUCED_WATER_CBM_CONUS_2016 # 6831
 set table=`echo $shapefile | tr "[:upper:]" "[:lower:]"`
-set geomtype=MultiPolygon       # retrieve the exact geopmetry type from the table.
-set attr="SPUD_COU_1"
+set attr="ACTIVITY"
+set geomtype=MultiPolygon
 source load_shapefile.2017.csh
 
-set shapefile=Completions_Gas  # 678 COMPLETI_1
+set shapefile=PRODUCED_WATER_GAS_CONUS_2016 # 6832
 set table=`echo $shapefile | tr "[:upper:]" "[:lower:]"`
-set geomtype=MultiPolygon          # retrieve the exact geopmetry type from the table.
-set attr="COMPLETI_1"
+set attr="ACTIVITY"
+set geomtype=MultiPolygon
+source load_shapefile.2017.csh
+
+set shapefile=PRODUCED_WATER_OIL_CONUS_2016 # 6833
+set table=`echo $shapefile | tr "[:upper:]" "[:lower:]"`
+set attr="ACTIVITY"
+set geomtype=MultiPolygon
+source load_shapefile.2017.csh
+
+set shapefile=SPUD_ALL_CONUS_2016 # 692
+set table=`echo $shapefile | tr "[:upper:]" "[:lower:]"`
+set attr="ACTIVITY"
+set geomtype=MultiPolygon
+source load_shapefile.2017.csh
+
+set shapefile=SPUD_CBM_CONUS_2016 # 670
+set table=`echo $shapefile | tr "[:upper:]" "[:lower:]"`
+set attr="ACTIVITY"
+set geomtype=MultiPolygon
+source load_shapefile.2017.csh
+
+set shapefile=SPUD_GAS_CONUS_2016 # 671
+set table=`echo $shapefile | tr "[:upper:]" "[:lower:]"`
+set attr="ACTIVITY"
+set geomtype=MultiPolygon
+source load_shapefile.2017.csh
+
+set shapefile=SPUD_OIL_CONUS_2016 # 681
+set table=`echo $shapefile | tr "[:upper:]" "[:lower:]"`
+set attr="ACTIVITY"
+set geomtype=MultiPolygon
+source load_shapefile.2017.csh
+
+set shapefile=TOTAL_EXPL_WELL_CONUS_2016 # 677
+set table=`echo $shapefile | tr "[:upper:]" "[:lower:]"`
+set attr="ACTIVITY"
+set geomtype=MultiPolygon
+source load_shapefile.2017.csh
+
+set shapefile=TOTAL_GAS_PRODUCTION_CONUS_2016 # 689
+set table=`echo $shapefile | tr "[:upper:]" "[:lower:]"`
+set attr="ACTIVITY"
+set geomtype=MultiPolygon
+source load_shapefile.2017.csh
+
+set shapefile=TOTAL_PROD_WELL_CONUS_2016 # 676
+set table=`echo $shapefile | tr "[:upper:]" "[:lower:]"`
+set attr="ACTIVITY"
+set geomtype=MultiPolygon
+source load_shapefile.2017.csh
+
+set shapefile=TOTAL_WELL_CONUS_2016 # 693
+set table=`echo $shapefile | tr "[:upper:]" "[:lower:]"`
+set attr="ACTIVITY"
+set geomtype=MultiPolygon
 source load_shapefile.2017.csh
 
 ### Load Shipping shapefile for 805, 806
