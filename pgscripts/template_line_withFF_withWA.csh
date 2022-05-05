@@ -75,8 +75,9 @@ printf "\tdenom double precision,\n" >> ${output_dir}/temp_files/${surg_code}_de
 printf "\tprimary key ($data_attribute));\n" >> ${output_dir}/temp_files/${surg_code}_denom.sql
 printf "insert into $schema.denom_${surg_code}_${grid}\n" >> ${output_dir}/temp_files/${surg_code}_denom.sql
 printf "SELECT $data_attribute,\n" >> ${output_dir}/temp_files/${surg_code}_denom.sql
-printf "\tSUM(${weight_attribute}*length_wp_cty_cell) AS denom\n" >> ${output_dir}/temp_files/${surg_code}_denom.sql
-printf "  FROM $schema.wp_cty_cell_${surg_code}_${grid}\n" >> ${output_dir}/temp_files/${surg_code}_denom.sql
+printf "\tSUM(${weight_attribute}*ST_Length(geom_${grid_proj})) AS denom\n" >> ${output_dir}/temp_files/${surg_code}_denom.sql
+printf "  FROM ${weight_table}\n" >> ${output_dir}/temp_files/${surg_code}_denom.sql
+printf " WHERE ${weight_table}.${filter_function}\n" >> ${output_dir}/temp_files/${surg_code}_create_wp_cty_cell.sql
 printf " GROUP BY $data_attribute;\n" >> ${output_dir}/temp_files/${surg_code}_denom.sql
 
 echo "CREATE TABLE $schema.denom_${surg_code}_${grid}; create primary key"
