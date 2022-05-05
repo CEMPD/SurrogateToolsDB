@@ -69,8 +69,8 @@ printf "\tdenom double precision,\n" >> ${output_dir}/temp_files/${surg_code}_de
 printf "\tprimary key ($data_attribute));\n" >> ${output_dir}/temp_files/${surg_code}_denom.sql
 printf "insert into $schema.denom_${surg_code}_${grid}\n" >> ${output_dir}/temp_files/${surg_code}_denom.sql
 printf "SELECT $data_attribute,\n" >> ${output_dir}/temp_files/${surg_code}_denom.sql
-printf "       SUM(count_wp_cty_cell) AS denom\n" >> ${output_dir}/temp_files/${surg_code}_denom.sql
-printf "  FROM $schema.wp_cty_cell_${surg_code}_${grid}\n" >> ${output_dir}/temp_files/${surg_code}_denom.sql
+printf "       SUM(count_wp_cty) AS denom\n" >> ${output_dir}/temp_files/${surg_code}_denom.sql
+printf "  FROM $schema.wp_cty_${surg_code}_${srid_final}\n" >> ${output_dir}/temp_files/${surg_code}_denom.sql
 printf " GROUP BY $data_attribute;\n" >> ${output_dir}/temp_files/${surg_code}_denom.sql
 echo "CREATE TABLE $schema.denom_${surg_code}_${grid}; create primary key"
 $PGBIN/psql -h $server -d $dbname -U $user -f ${output_dir}/temp_files/${surg_code}_denom.sql
@@ -128,4 +128,3 @@ SELECT surg_code, ${data_attribute}, colnum, rownum, ROUND(surg::NUMERIC, 10), '
   FROM $schema.surg_${surg_code}_${grid}
   order by $data_attribute, colnum, rownum;
 END
-
