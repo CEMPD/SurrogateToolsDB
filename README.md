@@ -153,7 +153,12 @@ Note that the file surrogate_generation_pg.2016v1.csv only has GENERATE set to Y
 
 ### Using a different grid with the same projection
 
-1. Update the script util/generate_modeling_grid.sh to define the new grid parameters.
+1. Update the script util/generate_modeling_grid.sh to define the new grid parameters. Note that the gridname (defined in the tblname variable) needs to follow Postgres' naming rules so it has to start with a letter or an underscore and can only contain letters, digits, and underscores, for example:
+
+   ```
+   tblname='us12k_516x444'
+   ```
+
 2. Update the control variables file (e.g. control_variables_pg.quickstart.csv) to set the grid name, output directory, and log file name.
 3. Generate the surrogates.
 
@@ -161,7 +166,12 @@ Note that the file surrogate_generation_pg.2016v1.csv only has GENERATE set to Y
 
 1. Add the projection to the database. The script util/create_900921.sql shows how the LAM_40N97W projection used in the CONUS domains is created. The srid field for the new projection needs to be unique in the database.
 2. Load the shapefiles using the new projection. Existing shapefile tables need to be deleted (or renamed). Update the script util/load_shapefile_reproject_multi.quickstart.csh with the new srid number.
-3. Update the script util/generate_modeling_grid.sh to define the new grid parameters, making sure to set the projection.
+3. Update the script util/generate_modeling_grid.sh to define the new grid parameters, making sure to set the projection. Note that the gridname (defined in the tblname variable) needs to follow Postgres' naming rules so it has to start with a letter or an underscore and can only contain letters, digits, and underscores, for example:
+
+   ```
+   tblname='us12k_516x444'
+   ```
+   
 4. Update the control variables file (e.g. control_variables_pg.quickstart.csv) to set the grid name, output directory, and log file name.
 5. Generate the surrogates.
 
