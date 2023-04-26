@@ -22,6 +22,10 @@ Note that Surrogate Tools DB currently only supports creating surrogates for reg
    GRANT ALL PRIVILEGES ON DATABASE surrogates TO pgsurg;
    GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO pgsurg;
    ```
+   - For Postgres 15 or newer, grant table creation privilege.
+   ```
+   GRANT CREATE ON SCHEMA public TO pgsurg;
+   ```
 
    - Install the Java Runtime Environment (if needed).
    - Install the tcsh package (if needed).
