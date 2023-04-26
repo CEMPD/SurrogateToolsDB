@@ -40,27 +40,27 @@ Note that Surrogate Tools DB currently only supports creating surrogates for reg
 
 2. Download the archive shapefiles.quickstart.v1_1.tar.gz (809 MB) from https://drive.google.com/drive/folders/1idGoi6I3GvKFCcf87O_8zMirM7Gtd0_E and unpack it in /opt/srgtool/data/. The full unpacked archive is about 1.5 GB.
    ```
-   cd /opt/srgtool/data
+   cd $SRG_HOME/data
    tar xvf shapefiles.quickstart.v1_1.tar.gz
    ```
 
 3. Add the output modeling projection to the Postgres database.
    ```
-   cd /opt/srgtool/util
-   psql -h $DBSERVER -d $DBNAME -U $PG_USER -f create_900921.sql
+   cd $SRG_HOME/util
+   $PGBIN/psql -h $DBSERVER -d $DBNAME -U $PG_USER -f create_900921.sql
    ```
    This command will add a new Lambert conformal conic projection with the ID 900921 to the spatial_ref_sys table in the database.
 
 4. Load the shapefiles into tables in the database.
    ```
-   cd /opt/srgtool/util
+   cd $SRG_HOME/util
    ./load_shapefile_reproject_multi.quickstart.csh
    ```
    This script will load the county boundaries shapefile (cb_2017_us_county_500k) and the population and housing shapefile (acs2016_5yr_bg) into the database.
 
 5. Create a database table representing the modeling grid.
    ```
-   cd /opt/srgtool/util
+   cd $SRG_HOME/util
    ./generate_modeling_grid.sh
    ```
    This script creates a 12 km grid using the Lambert projection added earlier.
@@ -83,7 +83,7 @@ Note that Surrogate Tools DB currently only supports creating surrogates for reg
 
 7. Run Surrogate Tools DB to generate surrogates.
    ```
-   cd /opt/srgtool
+   cd $SRG_HOME
    ./run_pg_srgcreate.quickstart.csh
    ```
    Various messages will be displayed as the tool runs. If there are no problems encountered, the last message will be
@@ -98,7 +98,7 @@ Note that Surrogate Tools DB currently only supports creating surrogates for reg
 
 8. Compare your outputs to the sample outputs using the `diffsurr` tool.
    ```
-   cd /opt/srgtool
+   cd $SRG_HOME
    ./bin/64bits/diffsurr.exe outputs/us12k_516x444/USA_100_NOFILL.txt 100 outputs/us12k_516x444_example/USA_100_NOFILL.txt 100 0.000001
    ```
    If the newly generated surrogates match the sample outputs, you'll see the message "The surrogate comparison was successful!"
@@ -118,14 +118,14 @@ USA,Housing,110,YES,YES,template_polygon_noFF_withWA.csh
 After updating the surrogate_generation_pg.quickstart.csv file, run Surrogate Tools DB to generate the surrogates.
 
 ```
-cd /opt/srgtool
+cd $SRG_HOME
 ./run_pg_srgcreate.quickstart.csh
 ```
 
 To compare your outputs to the sample outputs, use the following `diffsurr` command.
 
 ```
-cd /opt/srgtool
+cd $SRG_HOME
 ./bin/64bits/diffsurr.exe outputs/us12k_516x444/USA_110_NOFILL.txt 110 outputs/us12k_516x444_example/USA_110_NOFILL.txt 110 0.000001
 ```
 
