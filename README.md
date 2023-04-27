@@ -1,5 +1,5 @@
 # Surrogate Tools DB Quickstart Guide
-Last updated: 5/16/2022
+Last updated: 4/26/2023
 
 Note that Surrogate Tools DB currently only supports creating surrogates for regular grids. For E-Grid or census track (polygon) surrogates, please use the Spatial Allocator (https://www.cmascenter.org/sa-tools/).
 
