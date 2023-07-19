@@ -19,7 +19,7 @@ set geom_weight=${weight_table}.geom_${srid_final}
 echo $data_table
 # cut with geographic boundaries
 printf "DROP TABLE IF EXISTS ${schema_name}.wp_cty_${surg_code}_${srid_final};\n" > ${output_dir}/temp_files/${surg_code}_create_wp_cty.sql
-printf "CREATE TABLE ${schema_name}.wp_cty_${surg_code}_${srid_final}\n" > ${output_dir}/temp_files/${surg_code}_create_wp_cty.sql
+printf "CREATE TABLE ${schema_name}.wp_cty_${surg_code}_${srid_final}\n" >> ${output_dir}/temp_files/${surg_code}_create_wp_cty.sql
 printf "\t(${data_attribute} varchar (6) not null,\n" >> ${output_dir}/temp_files/${surg_code}_create_wp_cty.sql
 printf "\tarea_${srid_final} double precision default 0.0);\n" >> ${output_dir}/temp_files/${surg_code}_create_wp_cty.sql
 printf "SELECT AddGeometryColumn('${schema_name}', 'wp_cty_${surg_code}_${srid_final}', 'geom_${srid_final}', ${srid_final}, 'MultiPolygon', 2);\n" >> ${output_dir}/temp_files/${surg_code}_create_wp_cty.sql
