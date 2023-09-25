@@ -29,6 +29,7 @@ set geomtype=MultiPolygon
 source load_shapefile.2017.csh
 
 ### Load population and housing shapefile, and calculate density
+set indir=$shpdir/Census
 set shapefile=acs2016_5yr_bg
 set table=`echo $shapefile | tr "[:upper:]" "[:lower:]"`
 set geomtype=MultiPolygon          # retrieve the exact geopmetry type from the table.
