@@ -18,116 +18,143 @@ set geom_weight=${weight_table}.geom_${srid_final}
 
 echo $data_table
 # cut with geographic boundaries
-printf "DROP TABLE IF EXISTS ${schema_name}.wp_cty_${surg_code}_${srid_final};\n" > ${output_dir}/temp_files/${surg_code}_create_wp_cty.sql
-printf "CREATE TABLE ${schema_name}.wp_cty_${surg_code}_${srid_final}\n" >> ${output_dir}/temp_files/${surg_code}_create_wp_cty.sql
-printf "\t(${data_attribute} varchar (6) not null,\n" >> ${output_dir}/temp_files/${surg_code}_create_wp_cty.sql
-printf "\tarea_${srid_final} double precision default 0.0);\n" >> ${output_dir}/temp_files/${surg_code}_create_wp_cty.sql
-printf "SELECT AddGeometryColumn('${schema_name}', 'wp_cty_${surg_code}_${srid_final}', 'geom_${srid_final}', ${srid_final}, 'MultiPolygon', 2);\n" >> ${output_dir}/temp_files/${surg_code}_create_wp_cty.sql
-printf "insert into ${schema_name}.wp_cty_${surg_code}_${srid_final}\n" >> ${output_dir}/temp_files/${surg_code}_create_wp_cty.sql
-printf "SELECT ${data_table}.${data_attribute},\n" >> ${output_dir}/temp_files/${surg_code}_create_wp_cty.sql
-printf "        0.0,\n" >> ${output_dir}/temp_files/${surg_code}_create_wp_cty.sql
-printf "\tCASE\n" >> ${output_dir}/temp_files/${surg_code}_create_wp_cty.sql
-printf "\t\twhen ST_CoveredBy(${geom_weight},${geom_data})\n" >> ${output_dir}/temp_files/${surg_code}_create_wp_cty.sql
-printf "\t\tTHEN ${geom_weight}\n" >> ${output_dir}/temp_files/${surg_code}_create_wp_cty.sql
-printf "\tELSE\n" >> ${output_dir}/temp_files/${surg_code}_create_wp_cty.sql
-printf "\t\tST_CollectionExtract(ST_Multi(ST_Intersection(${geom_weight},${geom_data})), 3)\n" >> ${output_dir}/temp_files/${surg_code}_create_wp_cty.sql
-printf "\tEND AS geom_${srid_final}\n" >> ${output_dir}/temp_files/${surg_code}_create_wp_cty.sql
-printf "\tFROM ${data_table}\n" >> ${output_dir}/temp_files/${surg_code}_create_wp_cty.sql
-printf "\tJOIN ${weight_table}\n" >> ${output_dir}/temp_files/${surg_code}_create_wp_cty.sql
-printf "\tON (NOT ST_Touches(${geom_weight},${geom_data})\n" >> ${output_dir}/temp_files/${surg_code}_create_wp_cty.sql
-printf "\t\tAND ST_Intersects(${geom_weight},${geom_data}));\n" >> ${output_dir}/temp_files/${surg_code}_create_wp_cty.sql
-printf "UPDATE ${schema_name}.wp_cty_${surg_code}_${srid_final} SET geom_${srid_final} = ST_MakeValid(geom_${srid_final}) WHERE NOT ST_IsValid(geom_${srid_final});\n" >> ${output_dir}/temp_files/${surg_code}_create_wp_cty.sql
-printf "UPDATE  ${schema_name}.wp_cty_${surg_code}_${srid_final} SET area_${srid_final}=ST_Area(geom_${srid_final});\n"  >> ${output_dir}/temp_files/${surg_code}_create_wp_cty.sql
-printf "create index on ${schema}.wp_cty_${surg_code}_${srid_final} using GIST(geom_${grid_proj});\n" >> ${output_dir}/temp_files/${surg_code}_create_wp_cty.sql
-printf "\tvacuum analyze ${schema_name}.wp_cty_${surg_code}_${srid_final};" >> ${output_dir}/temp_files/${surg_code}_create_wp_cty.sql
+cat << ieof > ${output_dir}/temp_files/${surg_code}_create_wp_cty.sql
+-- Cutting by data shapefile boundaries
+DROP TABLE IF EXISTS ${schema_name}.wp_cty_${surg_code}_${srid_final};
+CREATE TABLE ${schema_name}.wp_cty_${surg_code}_${srid_final} (
+  ${data_attribute} varchar (6) not null,
+  area_${srid_final} double precision default 0.0);
+SELECT AddGeometryColumn('${schema_name}', 'wp_cty_${surg_code}_${srid_final}', 'geom_${srid_final}', ${srid_final}, 'MultiPolygon', 2);
+INSERT INTO ${schema_name}.wp_cty_${surg_code}_${srid_final}
+  SELECT 
+    ${data_table}.${data_attribute},
+    0.0,
+    CASE
+      WHEN ST_CoveredBy(${geom_weight},${geom_data})
+        THEN ${geom_weight}
+      ELSE
+        ST_CollectionExtract(ST_Multi(ST_Intersection(${geom_weight},${geom_data})), 3)
+    END AS geom_${srid_final}
+  FROM ${data_table}
+  JOIN ${weight_table}
+  ON ( ST_Intersects(${geom_weight},${geom_data})
+  AND NOT ST_Touches(${geom_weight},${geom_data}));
+UPDATE ${schema_name}.wp_cty_${surg_code}_${srid_final}
+  SET geom_${srid_final} = ST_MakeValid(geom_${srid_final}) WHERE NOT ST_IsValid(geom_${srid_final});
+UPDATE  ${schema_name}.wp_cty_${surg_code}_${srid_final} 
+  SET area_${srid_final}=ST_Area(geom_${srid_final});
+CREATE INDEX ON ${schema}.wp_cty_${surg_code}_${srid_final} USING GIST(geom_${grid_proj});
+VACUUM ANALYZE ${schema_name}.wp_cty_${surg_code}_${srid_final};
+ieof
+
 echo "Cutting by data shapefile boundaries"
 $PGBIN/psql -h $server -d $dbname -U $user -f ${output_dir}/temp_files/${surg_code}_create_wp_cty.sql
 
 
 # create query to grid weight data
-printf "DROP TABLE IF EXISTS wp_cty_cell_${surg_code}_${grid}; \n" > ${output_dir}/temp_files/${surg_code}_create_wp_cty_cell.sql
-echo "CREATE TABLE ${schema_name}.wp_cty_cell_${surg_code}_${grid} (" >> ${output_dir}/temp_files/${surg_code}_create_wp_cty_cell.sql
-printf "\t${data_attribute} varchar (6) not null,\n" >> ${output_dir}/temp_files/${surg_code}_create_wp_cty_cell.sql
-printf "\tcolnum integer not null,\n" >> ${output_dir}/temp_files/${surg_code}_create_wp_cty_cell.sql
-printf "\trownum integer not null,\n" >> ${output_dir}/temp_files/${surg_code}_create_wp_cty_cell.sql
-printf "\tarea_${srid_final} double precision default 1.0);\n" >> ${output_dir}/temp_files/${surg_code}_create_wp_cty_cell.sql
-printf "SELECT AddGeometryColumn('${schema_name}', 'wp_cty_cell_${surg_code}_${grid}', 'geom_${srid_final}', ${srid_final}, 'MultiPolygon', 2);\n" >> ${output_dir}/temp_files/${surg_code}_create_wp_cty_cell.sql
+cat << ieof > ${output_dir}/temp_files/${surg_code}_create_wp_cty_cell.sql
+-- Gridding weight data to modeling domain
+DROP TABLE IF EXISTS wp_cty_cell_${surg_code}_${grid};
+CREATE TABLE ${schema_name}.wp_cty_cell_${surg_code}_${grid} (
+  ${data_attribute} varchar (6) not null,
+  colnum integer not null,
+  rownum integer not null,
+  area_${srid_final} double precision default 1.0);
+SELECT AddGeometryColumn('${schema_name}', 'wp_cty_cell_${surg_code}_${grid}', 'geom_${srid_final}', ${srid_final}, 'MultiPolygon', 2);
 	
-printf "INSERT INTO ${schema_name}.wp_cty_cell_${surg_code}_${grid}\n" >> ${output_dir}/temp_files/${surg_code}_create_wp_cty_cell.sql
-printf "\tSELECT ${data_attribute}, colnum, rownum,\n" >> ${output_dir}/temp_files/${surg_code}_create_wp_cty_cell.sql
-printf "        0.0,\n" >> ${output_dir}/temp_files/${surg_code}_create_wp_cty_cell.sql
-printf "\tCASE\n" >> ${output_dir}/temp_files/${surg_code}_create_wp_cty_cell.sql
-printf "\twhen ST_CoveredBy(${schema}.wp_cty_${surg_code}_${srid_final}.geom_${grid_proj}, ${grid_table}.gridcell)\n" >> ${output_dir}/temp_files/${surg_code}_create_wp_cty_cell.sql
-printf "\t\tTHEN wp_cty_${surg_code}_${srid_final}.geom_${grid_proj}\n" >> ${output_dir}/temp_files/${surg_code}_create_wp_cty_cell.sql
-printf "\t\tELSE\n" >> ${output_dir}/temp_files/${surg_code}_create_wp_cty_cell.sql
-printf "\t\t\tST_CollectionExtract(ST_Multi(ST_Intersection(${schema}.wp_cty_${surg_code}_${srid_final}.geom_${grid_proj}, ${grid_table}.gridcell)),3)\n" >> ${output_dir}/temp_files/${surg_code}_create_wp_cty_cell.sql
-printf "\t\tEND AS geom_${srid_final}\n" >> ${output_dir}/temp_files/${surg_code}_create_wp_cty_cell.sql
-printf "\tFROM ${schema}.wp_cty_${surg_code}_${srid_final}\n" >> ${output_dir}/temp_files/${surg_code}_create_wp_cty_cell.sql
-printf "\tJOIN ${grid_table}\n" >> ${output_dir}/temp_files/${surg_code}_create_wp_cty_cell.sql
-printf "\tON (NOT ST_Touches(${schema}.wp_cty_${surg_code}_${srid_final}.geom_${grid_proj}, ${grid_table}.gridcell)\n" >> ${output_dir}/temp_files/${surg_code}_create_wp_cty_cell.sql
-printf "\t\tAND ST_Intersects(${schema}.wp_cty_${surg_code}_${srid_final}.geom_${grid_proj}, ${grid_table}.gridcell));\n" >> ${output_dir}/temp_files/${surg_code}_create_wp_cty_cell.sql
-printf "UPDATE ${schema_name}.wp_cty_cell_${surg_code}_${grid} SET geom_${srid_final} = ST_MakeValid(geom_${srid_final}) WHERE NOT ST_IsValid(geom_${srid_final});\n" >> ${output_dir}/temp_files/${surg_code}_create_wp_cty_cell.sql
-printf "UPDATE ${schema_name}.wp_cty_cell_${surg_code}_${grid} set area_${srid_final}=ST_Area(geom_${srid_final});\n" >> ${output_dir}/temp_files/${surg_code}_create_wp_cty_cell.sql
-printf "create index  on $schema.wp_cty_cell_${surg_code}_${grid} using GIST(geom_${grid_proj});\n" >> ${output_dir}/temp_files/${surg_code}_create_wp_cty_cell.sql
-printf "\tvacuum analyze ${schema_name}.wp_cty_cell_${surg_code}_${grid};" >> ${output_dir}/temp_files/${surg_code}_create_wp_cty_cell.sql
+INSERT INTO ${schema_name}.wp_cty_cell_${surg_code}_${grid}
+  SELECT ${data_attribute}, colnum, rownum,
+    0.0,
+    CASE
+      WHEN ST_CoveredBy(${schema}.wp_cty_${surg_code}_${srid_final}.geom_${grid_proj}, ${grid_table}.gridcell)
+        THEN wp_cty_${surg_code}_${srid_final}.geom_${grid_proj}
+      ELSE
+        ST_CollectionExtract(ST_Multi(ST_Intersection(${schema}.wp_cty_${surg_code}_${srid_final}.geom_${grid_proj}, ${grid_table}.gridcell)),3)
+    END AS geom_${srid_final}
+  FROM ${schema}.wp_cty_${surg_code}_${srid_final}
+  JOIN ${grid_table}
+  ON ( ST_Intersects(${schema}.wp_cty_${surg_code}_${srid_final}.geom_${grid_proj}, ${grid_table}.gridcell)
+  AND NOT ST_Touches(${schema}.wp_cty_${surg_code}_${srid_final}.geom_${grid_proj}, ${grid_table}.gridcell));
+UPDATE ${schema_name}.wp_cty_cell_${surg_code}_${grid}
+  SET geom_${srid_final} = ST_MakeValid(geom_${srid_final}) WHERE NOT ST_IsValid(geom_${srid_final});
+UPDATE ${schema_name}.wp_cty_cell_${surg_code}_${grid} 
+  SET area_${srid_final}=ST_Area(geom_${srid_final});
+CREATE INDEX ON $schema.wp_cty_cell_${surg_code}_${grid} USING GIST(geom_${grid_proj});
+VACUUM ANALYZE ${schema_name}.wp_cty_cell_${surg_code}_${grid};
+ieof
+
 echo "Gridding weight data to modeling domain"
 $PGBIN/psql -h $server -d $dbname -U $user -f ${output_dir}/temp_files/${surg_code}_create_wp_cty_cell.sql
 
 # Create numerater table
-printf "DROP TABLE IF EXISTS $schema.numer_${surg_code}_${grid}; \n" > ${output_dir}/temp_files/${surg_code}_numer.sql
-printf "CREATE TABLE $schema.numer_${surg_code}_${grid} ($data_attribute varchar(5) not null,\n" >> ${output_dir}/temp_files/${surg_code}_numer.sql
-printf "\tcolnum integer not null,\n" >> ${output_dir}/temp_files/${surg_code}_numer.sql
-printf "\trownum integer not null,\n" >> ${output_dir}/temp_files/${surg_code}_numer.sql
-printf "\tnumer double precision,\n" >> ${output_dir}/temp_files/${surg_code}_numer.sql
-printf "\tprimary key ($data_attribute, colnum, rownum));\n" >> ${output_dir}/temp_files/${surg_code}_numer.sql
-printf "insert into $schema.numer_${surg_code}_${grid}\n" >> ${output_dir}/temp_files/${surg_code}_numer.sql
-printf "SELECT $data_attribute,\n" >> ${output_dir}/temp_files/${surg_code}_numer.sql
-printf "\tcolnum,\n" >> ${output_dir}/temp_files/${surg_code}_numer.sql
-printf "\trownum,\n" >> ${output_dir}/temp_files/${surg_code}_numer.sql
-printf "\tSUM(area_${srid_final}) AS numer\n" >> ${output_dir}/temp_files/${surg_code}_numer.sql
-printf "  FROM $schema.wp_cty_cell_${surg_code}_${grid}\n" >> ${output_dir}/temp_files/${surg_code}_numer.sql
-printf " GROUP BY $data_attribute, colnum, rownum;\n" >> ${output_dir}/temp_files/${surg_code}_numer.sql
+cat << ieof > ${output_dir}/temp_files/${surg_code}_numer.sql
+-- CREATE TABLE $schema.numer_${surg_code}_${grid}
+DROP TABLE IF EXISTS $schema.numer_${surg_code}_${grid};
+CREATE TABLE $schema.numer_${surg_code}_${grid} (
+  $data_attribute varchar(5) not null,
+  colnum integer not null,
+  rownum integer not null,
+  numer double precision,
+  primary key ($data_attribute, colnum, rownum));
+INSERT INTO $schema.numer_${surg_code}_${grid}
+  SELECT 
+    $data_attribute,
+    colnum,
+    rownum,
+    SUM(area_${srid_final}) AS numer
+  FROM $schema.wp_cty_cell_${surg_code}_${grid}
+  GROUP BY $data_attribute, colnum, rownum;
+ieof
 echo "CREATE TABLE $schema.numer_${surg_code}_${grid}"
 $PGBIN/psql -h $server -d $dbname -U $user -f ${output_dir}/temp_files/${surg_code}_numer.sql
 
 # Calculate donominator
-printf "DROP TABLE IF EXISTS $schema.denom_${surg_code}_${grid}; \n" > ${output_dir}/temp_files/${surg_code}_denom.sql
-printf "CREATE TABLE $schema.denom_${surg_code}_${grid} ($data_attribute varchar(5) not null,\n" >> ${output_dir}/temp_files/${surg_code}_denom.sql
-printf "\tdenom double precision,\n" >> ${output_dir}/temp_files/${surg_code}_denom.sql
-printf "\tprimary key ($data_attribute));\n" >> ${output_dir}/temp_files/${surg_code}_denom.sql
-printf "insert into $schema.denom_${surg_code}_${grid}\n" >> ${output_dir}/temp_files/${surg_code}_denom.sql
-printf "SELECT $data_attribute,\n" >> ${output_dir}/temp_files/${surg_code}_denom.sql
-printf "\tSUM(area_${srid_final}) AS denom\n" >> ${output_dir}/temp_files/${surg_code}_denom.sql
-printf "  FROM $schema.wp_cty_${surg_code}_${srid_final}\n" >> ${output_dir}/temp_files/${surg_code}_denom.sql
-printf " GROUP BY $data_attribute;\n" >> ${output_dir}/temp_files/${surg_code}_denom.sql
+cat << ieof
+-- CREATE TABLE $schema.denom_${surg_code}_${grid}; create primary key
+DROP TABLE IF EXISTS $schema.denom_${surg_code}_${grid};
+CREATE TABLE $schema.denom_${surg_code}_${grid} (
+  $data_attribute varchar(5) not null,
+  denom double precision,
+  primary key ($data_attribute));
+INSERT INTO $schema.denom_${surg_code}_${grid}
+  SELECT $data_attribute,
+    SUM(area_${srid_final}) AS denom
+  FROM $schema.wp_cty_${surg_code}_${srid_final}
+  GROUP BY $data_attribute;
+ieof
 echo "CREATE TABLE $schema.denom_${surg_code}_${grid}; create primary key"
 $PGBIN/psql -h $server -d $dbname -U $user -f ${output_dir}/temp_files/${surg_code}_denom.sql
 
 # Calculate surrogate
-printf "DROP TABLE IF EXISTS $schema.surg_${surg_code}_${grid}; \n" > ${output_dir}/temp_files/${surg_code}_surg.sql
-printf "CREATE TABLE $schema.surg_${surg_code}_${grid} (surg_code integer not null,\n" >> ${output_dir}/temp_files/${surg_code}_surg.sql
-printf "\t$data_attribute varchar(5) not null,\n" >> ${output_dir}/temp_files/${surg_code}_surg.sql
-printf "\t      colnum integer not null,\n" >> ${output_dir}/temp_files/${surg_code}_surg.sql
-printf "\t      rownum integer not null,\n" >> ${output_dir}/temp_files/${surg_code}_surg.sql
-printf "\t      surg double precision,\n" >> ${output_dir}/temp_files/${surg_code}_surg.sql
-printf "\t      numer double precision,\n" >> ${output_dir}/temp_files/${surg_code}_surg.sql
-printf "\t      denom double precision,\n" >> ${output_dir}/temp_files/${surg_code}_surg.sql
-printf "\t      primary key ($data_attribute, colnum, rownum));\n" >> ${output_dir}/temp_files/${surg_code}_surg.sql
-printf "insert into $schema.surg_${surg_code}_${grid}\n" >> ${output_dir}/temp_files/${surg_code}_surg.sql
-printf "SELECT CAST('$surg_code' AS INTEGER) AS surg_code,\n" >> ${output_dir}/temp_files/${surg_code}_surg.sql
-printf "\td.$data_attribute,\n" >> ${output_dir}/temp_files/${surg_code}_surg.sql
-printf "\tcolnum,\n" >> ${output_dir}/temp_files/${surg_code}_surg.sql
-printf "\trownum,\n" >> ${output_dir}/temp_files/${surg_code}_surg.sql
-printf "\tnumer / denom AS surg,\n" >> ${output_dir}/temp_files/${surg_code}_surg.sql
-printf "\tnumer,\n" >> ${output_dir}/temp_files/${surg_code}_surg.sql
-printf "\tdenom\n" >> ${output_dir}/temp_files/${surg_code}_surg.sql
-printf "  FROM $schema.numer_${surg_code}_${grid} n\n" >> ${output_dir}/temp_files/${surg_code}_surg.sql
-printf "  JOIN $schema.denom_${surg_code}_${grid} d\n" >> ${output_dir}/temp_files/${surg_code}_surg.sql
-printf " USING ($data_attribute)\n" >> ${output_dir}/temp_files/${surg_code}_surg.sql
-printf " WHERE numer != 0\n" >> ${output_dir}/temp_files/${surg_code}_surg.sql
-printf "   AND denom != 0\n" >> ${output_dir}/temp_files/${surg_code}_surg.sql
-printf " GROUP BY d.$data_attribute, colnum, rownum, numer, denom\n" >> ${output_dir}/temp_files/${surg_code}_surg.sql
-printf " ORDER BY d.$data_attribute, colnum, rownum;\n" >> ${output_dir}/temp_files/${surg_code}_surg.sql
+cat << ieof > ${output_dir}/temp_files/${surg_code}_surg.sql
+-- CREATE TABLE $schema.surg_${surg_code}_${grid}; add primary key
+DROP TABLE IF EXISTS $schema.surg_${surg_code}_${grid};
+CREATE TABLE $schema.surg_${surg_code}_${grid} (
+  surg_code integer not null,
+  $data_attribute varchar(5) not null,
+  colnum integer not null,
+  rownum integer not null,
+  surg double precision,
+  numer double precision,
+  denom double precision,
+  primary key ($data_attribute, colnum, rownum));
+INSERT INTO $schema.surg_${surg_code}_${grid}
+  SELECT 
+    CAST('$surg_code' AS INTEGER) AS surg_code,
+    d.$data_attribute,
+    colnum,
+    rownum,
+    numer / denom AS surg,
+    numer,
+    denom
+  FROM $schema.numer_${surg_code}_${grid} n
+  JOIN $schema.denom_${surg_code}_${grid} d
+  USING ($data_attribute)
+   WHERE numer != 0
+     AND denom != 0
+  GROUP BY d.$data_attribute, colnum, rownum, numer, denom
+  ORDER BY d.$data_attribute, colnum, rownum;
+ieof
 echo "CREATE TABLE $schema.surg_${surg_code}_${grid}; add primary key"
 $PGBIN/psql -h $server -d $dbname -U $user -f ${output_dir}/temp_files/${surg_code}_surg.sql
 
