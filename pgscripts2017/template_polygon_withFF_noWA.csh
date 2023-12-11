@@ -35,6 +35,9 @@ WITH g AS (
   SELECT ${data_table}.* 
   FROM ${data_table} JOIN g
   ON ST_Intersects(${geom_data}, g.extent))
+, de AS (
+  SELECT ST_SetSRID(ST_Extent(${geom_d}),${srid_final}) AS extent 
+  FROM d)
 , w AS (
   SELECT ${weight_table}.* 
   FROM ${weight_table} JOIN g
