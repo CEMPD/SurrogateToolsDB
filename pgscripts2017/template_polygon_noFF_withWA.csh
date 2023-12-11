@@ -15,6 +15,8 @@ set geom_grid=$grid_table.gridcell
 set geom_data=${data_table}.geom_${srid_final}
 set geom_weight=${weight_table}.geom_${srid_final}
 
+set geom_d = "d.geom_${srid_final}"
+set geom_w = "w.geom_${srid_final}"
 
 echo $data_table
 # cut with geographic boundaries
@@ -28,9 +30,23 @@ CREATE TABLE ${schema_name}.wp_cty_${surg_code}_${srid_final} (
   area_${srid_final} double precision default 0.0);
 SELECT AddGeometryColumn('${schema_name}', 'wp_cty_${surg_code}_${srid_final}', 'geom_${srid_final}', ${srid_final}, 'MultiPolygon', 2);
 
+WITH ge AS (
+  SELECT ST_SetSRID(ST_Extent(gridcell),${srid_final}) AS extent 
+  FROM ${grid_table})
+, d AS (
+  SELECT ${data_table}.* 
+  FROM ${data_table} JOIN ge
+  ON ST_Intersects(${geom_data}, ge.extent))
+, de AS (
+  SELECT ST_SetSRID(ST_Extent(${geom_d}),${srid_final}) AS extent 
+  FROM d)
+, w AS (
+  SELECT ${weight_table}.* 
+  FROM ${weight_table} JOIN de
+  ON ST_Intersects(${geom_weight}, de.extent))
 INSERT INTO ${schema_name}.wp_cty_${surg_code}_${srid_final}
 SELECT 
-  ${data_table}.${data_attribute},
+  d.${data_attribute},
   ${weight_attribute},
   ${weight_attribute}_dens_${srid_final},
   0.0,
@@ -39,25 +55,26 @@ ieof
 if ( ${data_table} == ${weight_table} ) then 
   cat << ieof >> ${output_dir}/temp_files/${surg_code}_create_wp_cty.sql
   geom_${srid_final}
-FROM ${data_table}
+FROM ${data_table};
 ieof
 else 
   cat << ieof >> ${output_dir}/temp_files/${surg_code}_create_wp_cty.sql
   CASE
-    WHEN ST_CoveredBy(${geom_weight},${geom_data})
-      THEN ${geom_weight}
+    WHEN ST_CoveredBy(${geom_w},${geom_d})
+      THEN ${geom_w}
     ELSE
-      ST_CollectionExtract(ST_Multi(ST_Intersection(${geom_weight},${geom_data})), 3)
+      ST_CollectionExtract(ST_Multi(ST_Intersection(${geom_w},${geom_d})), 3)
   END AS geom_${srid_final}
-FROM ${data_table}
-JOIN ${weight_table}
-ON (ST_Intersects(${geom_weight},${geom_data})
-AND NOT ST_Touches(${geom_weight},${geom_data}));
+FROM d
+JOIN w
+ON (ST_Intersects(${geom_w},${geom_d})
+AND NOT ST_Touches(${geom_w},${geom_d}));
 ieof
 endif
 cat << ieof >> ${output_dir}/temp_files/${surg_code}_create_wp_cty.sql
 UPDATE ${schema_name}.wp_cty_${surg_code}_${srid_final} 
-  SET geom_${srid_final} = ST_MakeValid(geom_${srid_final}) WHERE NOT ST_IsValid(geom_${srid_final});
+  SET geom_${srid_final} = ST_MakeValid(geom_${srid_final})
+  WHERE NOT ST_IsValid(geom_${srid_final});
 UPDATE ${schema_name}.wp_cty_${surg_code}_${srid_final} 
   SET area_${srid_final}=ST_Area(geom_${srid_final});
 UPDATE  ${schema_name}.wp_cty_${surg_code}_${srid_final} 
@@ -65,9 +82,9 @@ UPDATE  ${schema_name}.wp_cty_${surg_code}_${srid_final}
 CREATE INDEX ON ${schema}.wp_cty_${surg_code}_${srid_final} USING GIST(geom_${grid_proj});
 VACUUM ANALYZE ${schema_name}.wp_cty_${surg_code}_${srid_final};
 ieof
+
 echo "Cutting by data shapefile boundaries"
 $PGBIN/psql -h $server -d $dbname -U $user  -f ${output_dir}/temp_files/${surg_code}_create_wp_cty.sql
-
 
 # create query to grid weight data
 cat << ieof > ${output_dir}/temp_files/${surg_code}_create_wp_cty_cell.sql
@@ -103,9 +120,10 @@ UPDATE ${schema_name}.wp_cty_cell_${surg_code}_${grid}
   SET area_${srid_final}=ST_Area(geom_${srid_final});
 UPDATE ${schema_name}.wp_cty_cell_${surg_code}_${grid}
   SET ${weight_attribute}=${weight_attribute}_dens_${srid_final} * area_${srid_final};
-CREATE INDEX  ON $schema.wp_cty_cell_${surg_code}_${grid} USING GIST(geom_${grid_proj});
+CREATE INDEX ON $schema.wp_cty_cell_${surg_code}_${grid} USING GIST(geom_${grid_proj});
 VACUUM ANALYZE ${schema_name}.wp_cty_cell_${surg_code}_${grid};
 ieof
+
 echo "Gridding weight data to modeling domain"
 $PGBIN/psql -h $server -d $dbname -U $user -f ${output_dir}/temp_files/${surg_code}_create_wp_cty_cell.sql
 

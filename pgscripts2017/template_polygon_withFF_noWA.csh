@@ -28,20 +28,20 @@ CREATE TABLE ${schema_name}.wp_cty_${surg_code}_${srid_final} (
   area_${srid_final} double precision default 0.0);
 SELECT AddGeometryColumn('${schema_name}', 'wp_cty_${surg_code}_${srid_final}', 'geom_${srid_final}', ${srid_final}, 'MultiPolygon', 2);
 
-WITH g AS (
+WITH ge AS (
   SELECT ST_SetSRID(ST_Extent(gridcell),${srid_final}) AS extent 
   FROM ${grid_table})
 , d AS (
   SELECT ${data_table}.* 
-  FROM ${data_table} JOIN g
-  ON ST_Intersects(${geom_data}, g.extent))
+  FROM ${data_table} JOIN ge
+  ON ST_Intersects(${geom_data}, ge.extent))
 , de AS (
   SELECT ST_SetSRID(ST_Extent(${geom_d}),${srid_final}) AS extent 
   FROM d)
 , w AS (
   SELECT ${weight_table}.* 
-  FROM ${weight_table} JOIN g
-  ON ST_Intersects(${geom_weight}, g.extent))
+  FROM ${weight_table} JOIN de
+  ON ST_Intersects(${geom_weight}, de.extent))
 INSERT INTO ${schema_name}.wp_cty_${surg_code}_${srid_final}
   SELECT 
     d.${data_attribute},
@@ -68,7 +68,6 @@ ieof
 
 echo "Cutting by data shapefile boundaries"
 $PGBIN/psql -h $server -d $dbname -U $user -f ${output_dir}/temp_files/${surg_code}_create_wp_cty.sql
-
 
 # create query to grid weight data
 cat << ieof > ${output_dir}/temp_files/${surg_code}_create_wp_cty_cell.sql
