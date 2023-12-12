@@ -8,7 +8,20 @@
 setenv shp_tbl `echo $shapefile | tr "[:upper:]" "[:lower:]"`
 
 echo $shapefile
-$GDALBIN/ogr2ogr -f "PostgreSQL" "PG:dbname=$dbname user=$user host=$server" $indir/$shapefile.shp -lco PRECISION=NO -nlt PROMOTE_TO_MULTI -nln $schema.$table -overwrite
+
+# this works but slow for large file
+
+#$GDALBIN/ogr2ogr -f "PostgreSQL" "PG:dbname=$dbname user=$user host=$server" $indir/$shapefile.shp -lco PRECISION=NO -nlt PROMOTE_TO_MULTI -nln $schema.$table -overwrite
+
+# alternative, load with shp2pgsql.  
+# a lot first for larger files, but problem is it doenst read projection. so have to read it first
+if ( ! -d sql ) then
+  mkdir sql
+endif
+source ./getsrid.csh $indir/${shapefile}.shp
+$PGBIN/shp2pgsql -d -D -i -g ${org_geom_field} -s ${mysrid} $indir/$shapefile.shp $schema.$table > sql/load_$table.sql
+$PGBIN/psql -h $server -U $user -q $dbname <  sql/load_$table.sql
+rm -f sql/load_$table.sql
 echo "Finished loading shapefile: " $indir/$shapefile.shp
 
 # 2. Tranform to a new projection (from original to new 900921/900915) and create gist index on it
