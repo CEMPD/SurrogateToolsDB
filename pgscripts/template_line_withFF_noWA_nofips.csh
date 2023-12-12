@@ -4,8 +4,6 @@
 # - county shapefile, weight multiline shapefile (hpms roads), and grid cells geometries loaded
 # - indices on all geometry columns
 
-setenv PGPASSWORD satool
-
 VAR_DEFINITIONS
 
 set grid_table=$schema.$grid

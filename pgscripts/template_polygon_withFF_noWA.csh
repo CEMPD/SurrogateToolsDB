@@ -3,8 +3,6 @@
 # AFTER sucessful completion of acs_2014_prcs_script.sh; performs grid overlay and related calculations
 # handles reprojections of geometry objects (geographic polygons), vacuum, analyze, and cluster as appropriate
 
-setenv PGPASSWORD satool
-
 VAR_DEFINITIONS
 
 setenv cluster false					

@@ -6,8 +6,6 @@
 
 #setenv LD_LIBRARY_PATH "${LD_LIBRARY_PATH}:/nas02/apps/gcc-6.1.0/lib:/proj/ie/proj/CMAS/SA/Spatial-Allocator/pg_srgcreate/libs/geos-3.5.1/local/lib:/proj/ie/proj/CMAS/SA/Spatial-Allocator/pg_srgcreate/libs/proj-4.9.3/local/lib:/proj/ie/proj/CMAS/SA/Spatial-Allocator/pg_srgcreate/libs/json-c-json-c-0.12.1-20160607/local/lib: /proj/ie/proj/CMAS/SA/spatial-Allocator/pg_srgcreate/libs/libxml2-2.9.4/local/lib:/proj/ie/proj/CMAS/SA/Spatial-Allocator/pg_srgcreate/libs/gdal-2.1.3/local/lib:/proj/ie/proj/CMAS/SA/Spatial-Allocator/pg_srgcreate/postgresql-9.5.3/lib"
 
-setenv PGPASSWORD satool
-
 VAR_DEFINITIONS
 
 set grid_table=$schema.$grid

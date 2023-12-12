@@ -5,8 +5,6 @@
 # - indices on all geometry columns
 # - roads split by county boundaries 
 
-setenv PGPASSWORD satool
-
 VAR_DEFINITIONS
 
 set grid_table=$schema.$grid
