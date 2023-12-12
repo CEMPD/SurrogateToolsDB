@@ -6,6 +6,7 @@
 
 #setenv LD_LIBRARY_PATH "${LD_LIBRARY_PATH}:/nas02/apps/gcc-6.1.0/lib:/proj/ie/proj/CMAS/SA/Spatial-Allocator/pg_srgcreate/libs/geos-3.5.1/local/lib:/proj/ie/proj/CMAS/SA/Spatial-Allocator/pg_srgcreate/libs/proj-4.9.3/local/lib:/proj/ie/proj/CMAS/SA/Spatial-Allocator/pg_srgcreate/libs/json-c-json-c-0.12.1-20160607/local/lib: /proj/ie/proj/CMAS/SA/spatial-Allocator/pg_srgcreate/libs/libxml2-2.9.4/local/lib:/proj/ie/proj/CMAS/SA/Spatial-Allocator/pg_srgcreate/libs/gdal-2.1.3/local/lib:/proj/ie/proj/CMAS/SA/Spatial-Allocator/pg_srgcreate/postgresql-9.5.3/lib"
 
+setenv PGPASSWORD satool
 
 VAR_DEFINITIONS
 
@@ -22,7 +23,7 @@ echo "CREATE TABLE $schema.wp_cty_${surg_code} If Not Exist"
 
 printf "DROP TABLE IF EXISTS $schema.wp_cty_${surg_code}; \n" > ${output_dir}/temp_files/${surg_code}_create_wp_cty.sql
 printf "CREATE TABLE $schema.wp_cty_${surg_code}(\n" >> ${output_dir}/temp_files/${surg_code}_create_wp_cty.sql
-printf "\t$data_attribute varchar(5),\n" >> ${output_dir}/temp_files/${surg_code}_create_wp_cty.sql
+printf "\t$data_attribute varchar(6),\n" >> ${output_dir}/temp_files/${surg_code}_create_wp_cty.sql
 printf "\tcount_wp_cty integer default 1);\n" >> ${output_dir}/temp_files/${surg_code}_create_wp_cty.sql
 printf "SELECT AddGeometryColumn('${schema}', 'wp_cty_${surg_code}', 'geom_${grid_proj}', ${grid_proj}, 'MULTIPOINT', 2);\n" >> ${output_dir}/temp_files/${surg_code}_create_wp_cty.sql
 printf "INSERT INTO $schema.wp_cty_${surg_code} (geom_${grid_proj}) \n">> ${output_dir}/temp_files/${surg_code}_create_wp_cty.sql
@@ -42,7 +43,7 @@ $PGBIN/psql -h $server -d $dbname -U $user -f ${output_dir}/temp_files/${surg_co
 # Create wp_cty_cell intersection table
 printf "DROP TABLE IF EXISTS $schema.wp_cty_cell_${surg_code}_${grid}; \n" > ${output_dir}/temp_files/${surg_code}_create_wp_cty_cell.sql
 printf "CREATE TABLE $schema.wp_cty_cell_${surg_code}_${grid}(\n" >> ${output_dir}/temp_files/${surg_code}_create_wp_cty_cell.sql
-printf "\t$data_attribute varchar(5) not null, \n" >>  ${output_dir}/temp_files/${surg_code}_create_wp_cty_cell.sql
+printf "\t$data_attribute varchar(6) not null, \n" >>  ${output_dir}/temp_files/${surg_code}_create_wp_cty_cell.sql
 printf "\tcolnum integer not null,\n" >>  ${output_dir}/temp_files/${surg_code}_create_wp_cty_cell.sql
 printf "\trownum integer not null,\n" >>  ${output_dir}/temp_files/${surg_code}_create_wp_cty_cell.sql
 printf "\tcount_wp_cty_cell integer default 1);\n" >>  ${output_dir}/temp_files/${surg_code}_create_wp_cty_cell.sql
@@ -62,7 +63,7 @@ $PGBIN/psql -h $server -d $dbname -U $user -f ${output_dir}/temp_files/${surg_co
 
 # Create denominator table
 printf "DROP TABLE IF EXISTS $schema.denom_${surg_code}_${grid}; \n" > ${output_dir}/temp_files/${surg_code}_denom.sql
-printf "CREATE TABLE $schema.denom_${surg_code}_${grid} ($data_attribute varchar(5) not null,\n" >> ${output_dir}/temp_files/${surg_code}_denom.sql
+printf "CREATE TABLE $schema.denom_${surg_code}_${grid} ($data_attribute varchar(6) not null,\n" >> ${output_dir}/temp_files/${surg_code}_denom.sql
 printf "\tdenom double precision,\n" >> ${output_dir}/temp_files/${surg_code}_denom.sql
 printf "\tprimary key ($data_attribute));\n" >> ${output_dir}/temp_files/${surg_code}_denom.sql
 printf "insert into $schema.denom_${surg_code}_${grid}\n" >> ${output_dir}/temp_files/${surg_code}_denom.sql
@@ -75,7 +76,7 @@ $PGBIN/psql -h $server -d $dbname -U $user -f ${output_dir}/temp_files/${surg_co
 
 # Create numerator table
 printf "DROP TABLE IF EXISTS $schema.numer_${surg_code}_${grid}; \n" > ${output_dir}/temp_files/${surg_code}_numer.sql
-printf "CREATE TABLE $schema.numer_${surg_code}_${grid} ($data_attribute varchar(5) not null,\n" >> ${output_dir}/temp_files/${surg_code}_numer.sql
+printf "CREATE TABLE $schema.numer_${surg_code}_${grid} ($data_attribute varchar(6) not null,\n" >> ${output_dir}/temp_files/${surg_code}_numer.sql
 printf "\tcolnum integer not null,\n" >> ${output_dir}/temp_files/${surg_code}_numer.sql
 printf "\trownum integer not null,\n" >> ${output_dir}/temp_files/${surg_code}_numer.sql
 printf "\tnumer double precision,\n" >> ${output_dir}/temp_files/${surg_code}_numer.sql
@@ -93,7 +94,7 @@ $PGBIN/psql -h $server -d $dbname -U $user -f ${output_dir}/temp_files/${surg_co
 # Create surrogate table
 printf "DROP TABLE IF EXISTS $schema.surg_${surg_code}_${grid}; \n" > ${output_dir}/temp_files/${surg_code}_surg.sql
 printf "CREATE TABLE $schema.surg_${surg_code}_${grid} (surg_code integer not null,\n" >> ${output_dir}/temp_files/${surg_code}_surg.sql
-printf "\t$data_attribute varchar(5) not null,\n" >>  ${output_dir}/temp_files/${surg_code}_surg.sql
+printf "\t$data_attribute varchar(6) not null,\n" >>  ${output_dir}/temp_files/${surg_code}_surg.sql
 printf "\t	colnum integer not null,\n" >>  ${output_dir}/temp_files/${surg_code}_surg.sql
 printf "\t	rownum integer not null,\n" >>  ${output_dir}/temp_files/${surg_code}_surg.sql
 printf "\t	surg double precision,\n" >>  ${output_dir}/temp_files/${surg_code}_surg.sql
@@ -119,8 +120,8 @@ echo "CREATE TABLE $schema.surg_${surg_code}_${grid}; add primary key"
 $PGBIN/psql -h $server -d $dbname -U $user -f ${output_dir}/temp_files/${surg_code}_surg.sql
 
 echo "Exporting surrogates $schema.surg_${surg_code}_${grid}; "
-echo "#GRID" > ${output_dir}/USA_${surg_code}_NOFILL.txt
-$PGBIN/psql -h $server -d $dbname -U $user --field-separator '	' -t --no-align << END >> ${output_dir}/USA_${surg_code}_NOFILL.txt
+echo "#GRID" > ${output_dir}/${region}_${surg_code}_NOFILL.txt
+$PGBIN/psql -h $server -d $dbname -U $user --field-separator '	' -t --no-align << END >> ${output_dir}/${region}_${surg_code}_NOFILL.txt
 
 SELECT surg_code, ${data_attribute}, colnum, rownum, ROUND(surg::NUMERIC, 10), '!', numer, denom
   FROM $schema.surg_${surg_code}_${grid}
