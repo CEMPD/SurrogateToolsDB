@@ -52,10 +52,10 @@ INSERT INTO ${schema_name}.wp_cty_${surg_code}_${srid_final}
       ELSE
         ST_CollectionExtract(ST_Multi(ST_Intersection(${geom_w},${geom_d})), 3)
     END AS geom_${srid_final}
-  FROM ${data_table}
-  JOIN ${weight_table}
-  ON ( ST_Intersects(${geom_weight},${geom_data})
-  AND NOT ST_Touches(${geom_weight},${geom_data}));
+  FROM d
+  JOIN w
+  ON ( ST_Intersects(${geom_w},${geom_d})
+  AND NOT ST_Touches(${geom_w},${geom_d}));
 UPDATE ${schema_name}.wp_cty_${surg_code}_${srid_final}
   SET geom_${srid_final} = ST_MakeValid(geom_${srid_final}) WHERE NOT ST_IsValid(geom_${srid_final});
 UPDATE  ${schema_name}.wp_cty_${surg_code}_${srid_final} 
@@ -125,7 +125,7 @@ echo "CREATE TABLE $schema.numer_${surg_code}_${grid}"
 $PGBIN/psql -h $server -d $dbname -U $user -f ${output_dir}/temp_files/${surg_code}_numer.sql
 
 # Calculate donominator
-cat << ieof
+cat << ieof > ${output_dir}/temp_files/${surg_code}_denom.sql
 -- CREATE TABLE $schema.denom_${surg_code}_${grid}; create primary key
 DROP TABLE IF EXISTS $schema.denom_${surg_code}_${grid};
 CREATE TABLE $schema.denom_${surg_code}_${grid} (
