@@ -73,7 +73,7 @@ $PGBIN/psql -h $server -d $dbname -U $user -f ${output_dir}/temp_files/${surg_co
 
 # Create numerater table
 printf "DROP TABLE IF EXISTS $schema.numer_${surg_code}_${grid}; \n" > ${output_dir}/temp_files/${surg_code}_numer.sql
-printf "CREATE TABLE $schema.numer_${surg_code}_${grid} ($data_attribute varchar(5) not null,\n" >> ${output_dir}/temp_files/${surg_code}_numer.sql
+printf "CREATE TABLE $schema.numer_${surg_code}_${grid} ($data_attribute varchar(6) not null,\n" >> ${output_dir}/temp_files/${surg_code}_numer.sql
 printf "\tcolnum integer not null,\n" >> ${output_dir}/temp_files/${surg_code}_numer.sql
 printf "\trownum integer not null,\n" >> ${output_dir}/temp_files/${surg_code}_numer.sql
 printf "\tnumer double precision,\n" >> ${output_dir}/temp_files/${surg_code}_numer.sql
@@ -90,7 +90,7 @@ $PGBIN/psql -h $server -d $dbname -U $user -f ${output_dir}/temp_files/${surg_co
 
 # Calculate donominator
 printf "DROP TABLE IF EXISTS $schema.denom_${surg_code}_${grid}; \n" > ${output_dir}/temp_files/${surg_code}_denom.sql
-printf "CREATE TABLE $schema.denom_${surg_code}_${grid} ($data_attribute varchar(5) not null,\n" >> ${output_dir}/temp_files/${surg_code}_denom.sql
+printf "CREATE TABLE $schema.denom_${surg_code}_${grid} ($data_attribute varchar(6) not null,\n" >> ${output_dir}/temp_files/${surg_code}_denom.sql
 printf "\tdenom double precision,\n" >> ${output_dir}/temp_files/${surg_code}_denom.sql
 printf "\tprimary key ($data_attribute));\n" >> ${output_dir}/temp_files/${surg_code}_denom.sql
 printf "insert into $schema.denom_${surg_code}_${grid}\n" >> ${output_dir}/temp_files/${surg_code}_denom.sql
@@ -104,7 +104,7 @@ $PGBIN/psql -h $server -d $dbname -U $user -f ${output_dir}/temp_files/${surg_co
 # Calculate surrogate
 printf "DROP TABLE IF EXISTS $schema.surg_${surg_code}_${grid}; \n" > ${output_dir}/temp_files/${surg_code}_surg.sql
 printf "CREATE TABLE $schema.surg_${surg_code}_${grid} (surg_code integer not null,\n" >> ${output_dir}/temp_files/${surg_code}_surg.sql
-printf "\t$data_attribute varchar(5) not null,\n" >> ${output_dir}/temp_files/${surg_code}_surg.sql
+printf "\t$data_attribute varchar(6) not null,\n" >> ${output_dir}/temp_files/${surg_code}_surg.sql
 printf "\t      colnum integer not null,\n" >> ${output_dir}/temp_files/${surg_code}_surg.sql
 printf "\t      rownum integer not null,\n" >> ${output_dir}/temp_files/${surg_code}_surg.sql
 printf "\t      surg double precision,\n" >> ${output_dir}/temp_files/${surg_code}_surg.sql
@@ -131,8 +131,8 @@ $PGBIN/psql -h $server -d $dbname -U $user -f ${output_dir}/temp_files/${surg_co
 
 # Export surrogate
 echo "Exporting surrogates $schema.surg_${surg_code}_${grid}; "
-echo "#GRID" > ${output_dir}/USA_${surg_code}_NOFILL.txt
-$PGBIN/psql -h $server -d $dbname -U $user --field-separator '	' -t --no-align << END >> ${output_dir}/USA_${surg_code}_NOFILL.txt
+echo "#GRID" > ${output_dir}/${region}_${surg_code}_NOFILL.txt
+$PGBIN/psql -h $server -d $dbname -U $user --field-separator '	' -t --no-align << END >> ${output_dir}/${region}_${surg_code}_NOFILL.txt
 
 SELECT surg_code, ${data_attribute}, colnum, rownum, ROUND(surg::NUMERIC, 10), '!', numer, denom
   FROM $schema.surg_${surg_code}_${grid}
