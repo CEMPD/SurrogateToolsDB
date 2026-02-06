@@ -78,10 +78,12 @@ def connect_db(config: dict, backend: str = None):
 # PostGIS spatial operations (raw SQL)
 # ============================================================================
 
-def setup_postgis(con):
-    """Enable PostGIS extension."""
+def setup_postgis(con, enable_raster: bool = True):
+    """Enable PostGIS extensions."""
     con.raw_sql("CREATE EXTENSION IF NOT EXISTS postgis")
-    print("PostGIS enabled")
+    if enable_raster:
+        con.raw_sql("CREATE EXTENSION IF NOT EXISTS postgis_raster")
+    print("PostGIS extensions enabled")
 
 
 def create_srid(con, srid: int, proj4: str, name: str = ""):
