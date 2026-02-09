@@ -325,4 +325,12 @@ def _load_projections(con, config: dict):
 if __name__ == "__main__":
     config = load_config()
     con = setup_database(config)
-    print(f"Setup complete. Tables: {con.list_tables()}")
+    tables = con.raw_sql(
+        "SELECT tablename FROM pg_tables WHERE schemaname = 'public'"
+    ).fetchall()
+    views = con.raw_sql(
+        "SELECT viewname FROM pg_views WHERE schemaname = 'public'"
+    ).fetchall()
+    print(f"Setup complete.")
+    print(f"  Tables: {[t[0] for t in tables]}")
+    print(f"  Views:  {[v[0] for v in views]}")
