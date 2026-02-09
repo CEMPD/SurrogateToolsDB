@@ -1,14 +1,17 @@
 """
-Database utilities - config loading and Ibis connection.
+Database utilities - config loading, connection, and setup.
 
-Simple module with two main functions:
-1. load_config() - load YAML config
-2. connect_db() - connect to database via Ibis
+Public API:
+  load_config()    - load YAML config
+  connect_db()     - connect to target database via Ibis
+  setup_database() - complete database setup (create DB, PostGIS, projections)
 """
 
 from pathlib import Path
 
 import ibis
+import psycopg2
+from psycopg2 import sql
 import yaml
 
 
@@ -23,7 +26,6 @@ def load_config(config_path: str = None) -> dict:
         dict with all configuration
     """
     if config_path is None:
-        # Default: database_config.yaml in parent directory of scripts/
         config_path = Path(__file__).parent.parent / "database_config.yaml"
     else:
         config_path = Path(config_path)
@@ -75,31 +77,97 @@ def connect_db(config: dict, backend: str = None):
 
 
 # ============================================================================
-# PostGIS spatial operations (raw SQL)
+# Database setup
 # ============================================================================
 
-def setup_postgis(con, enable_raster: bool = True):
-    """Enable PostGIS extensions."""
+def setup_database(config: dict):
+    """
+    Complete database setup. Automates README Steps 0a/0b/3:
+      1. Create database if not exists
+      2. Enable PostGIS extensions
+      3. Register output modeling projections
+
+    Returns:
+        Ibis connection to the target database
+    """
+    pg = config["database"]["postgres"]
+
+    # Step 1: Create database
+    _create_database(pg)
+
+    # Step 2: Connect to target database
+    con = connect_db(config)
+
+    # Step 3: Enable PostGIS + PostGIS raster
+    _enable_postgis(con)
+
+    # Step 4: Register projections
+    _load_projections(con, config)
+
+    return con
+
+
+def _create_database(pg_config: dict):
+    """Create target database if it doesn't exist."""
+    dbname = pg_config["database"]
+
+    conn = psycopg2.connect(
+        host=pg_config["host"],
+        port=pg_config["port"],
+        database="postgres",
+        user=pg_config["user"],
+        password=pg_config.get("password", ""),
+    )
+    conn.autocommit = True
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT 1 FROM pg_database WHERE datname = %s", (dbname,))
+        if cur.fetchone():
+            print(f"Database '{dbname}' already exists")
+        else:
+            cur.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(dbname)))
+            print(f"Created database '{dbname}'")
+        cur.close()
+    finally:
+        conn.close()
+
+
+def _enable_postgis(con):
+    """Enable PostGIS and PostGIS raster extensions."""
     con.raw_sql("CREATE EXTENSION IF NOT EXISTS postgis")
-    if enable_raster:
-        con.raw_sql("CREATE EXTENSION IF NOT EXISTS postgis_raster")
+    con.raw_sql("CREATE EXTENSION IF NOT EXISTS postgis_raster")
     print("PostGIS extensions enabled")
 
 
-def create_srid(con, srid: int, proj4: str, name: str = ""):
-    """Create custom SRID if not exists."""
-    # Check if exists
-    result = con.raw_sql(f"SELECT COUNT(*) FROM spatial_ref_sys WHERE srid = {srid}").fetchone()
-    if result[0] > 0:
-        print(f"SRID {srid} already exists")
+def _load_projections(con, config: dict):
+    """Register output modeling projections from SQL files in config."""
+    projections = config.get("spatial", {}).get("projections", {})
+    if not projections:
+        print("No projections configured")
         return
 
-    sql = f"""
-        INSERT INTO spatial_ref_sys (srid, auth_name, auth_srid, srtext, proj4text)
-        VALUES ({srid}, 'CUSTOM', {srid}, '{name}', '{proj4}')
-    """
-    con.raw_sql(sql)
-    print(f"Created SRID {srid}")
+    for srid, sql_file in projections.items():
+        srid = int(srid)
+
+        result = con.raw_sql(
+            f"SELECT COUNT(*) FROM spatial_ref_sys WHERE srid = {srid}"
+        ).fetchone()
+        if result[0] > 0:
+            print(f"SRID {srid} already exists, skipping")
+            continue
+
+        path = Path(sql_file)
+        if not path.exists():
+            print(f"WARNING: projection SQL file not found: {path}")
+            continue
+
+        raw = path.read_text(encoding="utf-8").strip()
+        if not raw:
+            print(f"WARNING: empty projection SQL file: {path}")
+            continue
+
+        con.raw_sql(raw)
+        print(f"SRID {srid} loaded from {path.name}")
 
 
 # ============================================================================
@@ -107,12 +175,6 @@ def create_srid(con, srid: int, proj4: str, name: str = ""):
 # ============================================================================
 
 if __name__ == "__main__":
-    # Test config loading
     config = load_config()
-    print(f"Database backend: {config['database']['backend']}")
-    print(f"Target SRID: {config['spatial']['target_srid']}")
-    print(f"Shapefiles: {list(config.get('shapefiles', {}).keys())}")
-
-    # Test DuckDB connection (no server needed)
-    con = connect_db(config, backend="duckdb")
-    print(f"Tables: {con.list_tables()}")
+    con = setup_database(config)
+    print(f"Setup complete. Tables: {con.list_tables()}")
