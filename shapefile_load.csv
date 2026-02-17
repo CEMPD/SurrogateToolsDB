@@ -1,0 +1,8 @@
+# Shapefiles to load into PostGIS.
+# name = shapefile filename without .shp extension
+# dir  = directory on disk containing the .shp file
+# Lines starting with # are ignored.
+name,dir
+cb_2017_us_county_500k,/opt/srgtool/data/emiss_shp2017/Census
+acs2016_5yr_bg,/opt/srgtool/data/emiss_shp2017/Census
+# hpms2017_v3_04052020,/opt/srgtool/data/emiss_shp2017/HPMS
