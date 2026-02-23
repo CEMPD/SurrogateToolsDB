@@ -173,7 +173,8 @@ def _setup_app_user_mode(config, pg):
 
     con = connect_db(config)
     _enable_postgis(con)
-    _load_projections(con, config)
+    # Projection loading removed from setup — belongs to grid/reproject step.
+    # Use reproject.ensure_srid() instead.
     return con
 
 
@@ -188,19 +189,16 @@ def _setup_super_user_mode(config, pg, config_path):
     # Step 3: Enable PostGIS + PostGIS raster
     _enable_postgis(con)
 
-    # Step 4: Register projections
-    _load_projections(con, config)
-
-    # Step 5: Prompt for app user credentials
+    # Step 4: Prompt for app user credentials
     app_user, app_password = _prompt_app_user()
 
-    # Step 6: Create app user & grant privileges
+    # Step 5: Create app user & grant privileges
     _create_user(pg, app_user, app_password)
 
-    # Step 7: Rewrite config to app user mode
+    # Step 6: Rewrite config to app user mode
     _rewrite_config(config_path, app_user, app_password)
 
-    # Step 8: Update in-memory config and reconnect as app user
+    # Step 7: Update in-memory config and reconnect as app user
     config["database"]["postgres"].pop("user", None)
     config["database"]["postgres"].pop("password", None)
     config["database"]["postgres"]["app_user"] = app_user
