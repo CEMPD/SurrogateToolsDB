@@ -171,17 +171,37 @@ def reproject_table(con, table_name: str, srid: int, geomtype: str,
         return {"table": table_name, "status": "error",
                 "reason": "no geomtype"}
 
+    # Check if wkb_geometry already uses the target SRID
+    src_srid = con.raw_sql(f"""
+        SELECT srid FROM geometry_columns
+        WHERE f_table_schema = '{schema}'
+          AND f_table_name   = '{table_name}'
+          AND f_geometry_column = 'wkb_geometry'
+    """).fetchone()
+    if src_srid and src_srid[0] == srid:
+        logger.warning(
+            "%s: wkb_geometry already in SRID %d — copying without transform",
+            table_name, srid)
+
     # Step 1 — add typed geometry column
     con.raw_sql(f"""
         ALTER TABLE {schema}.{table_name}
         ADD COLUMN {col_name} geometry({geomtype}, {srid})
     """)
 
-    # Step 2 — transform from original SRID to target
-    con.raw_sql(f"""
-        UPDATE {schema}.{table_name}
-        SET {col_name} = ST_Multi(ST_Transform(wkb_geometry, {srid}))
-    """)
+    # Step 2 — transform or copy
+    already_matches = src_srid and src_srid[0] == srid
+    if already_matches:
+        # Source already in target SRID — copy geometry, skip transform
+        con.raw_sql(f"""
+            UPDATE {schema}.{table_name}
+            SET {col_name} = ST_Multi(wkb_geometry)
+        """)
+    else:
+        con.raw_sql(f"""
+            UPDATE {schema}.{table_name}
+            SET {col_name} = ST_Multi(ST_Transform(wkb_geometry, {srid}))
+        """)
 
     # Step 3 — spatial index
     con.raw_sql(
