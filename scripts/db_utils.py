@@ -4,7 +4,7 @@ Database utilities - config loading, connection, and setup.
 Main functions:
   load_config()    - load CSV config
   connect_db()     - connect to target database via Ibis
-  setup_database() - complete database setup (create DB, PostGIS, projections)
+  setup_database() - complete database setup (create DB, PostGIS, app user)
 """
 
 import csv
@@ -39,13 +39,6 @@ def load_config(config_path: str = None) -> dict:
         for row in reader:
             flat[row["key"].strip()] = row["value"].strip()
 
-    # Collect projection_<SRID> keys
-    projections = {
-        k[len("projection_"):]: v
-        for k, v in flat.items()
-        if k.startswith("projection_") and v
-    }
-
     return {
         "database": {
             "backend": flat.get("backend", "postgres"),
@@ -61,7 +54,6 @@ def load_config(config_path: str = None) -> dict:
             "duckdb":  {"path": flat.get("duckdb_path", "")},
             "sqlite":  {"path": flat.get("sqlite_path", "")},
         },
-        "spatial": {"projections": projections},
     }
 
 
@@ -121,11 +113,10 @@ def setup_database(config: dict, config_path: str = None):
       - `user`/`password`         → superuser mode (first run)
       - `app_user`/`app_password` → app user mode (subsequent runs)
 
-    In superuser mode: creates DB, extensions, projections, prompts for app
+    In superuser mode: creates DB, extensions, prompts for app
     credentials, creates the app user, grants privileges, and rewrites config.
 
-    In app user mode: connects directly, enables extensions,
-    loads projections (skips existing).
+    In app user mode: connects directly, enables extensions.
 
     Args:
         config: Config dict from load_config()
@@ -339,37 +330,6 @@ def _enable_postgis(con):
     con.raw_sql("CREATE EXTENSION IF NOT EXISTS postgis")
     con.raw_sql("CREATE EXTENSION IF NOT EXISTS postgis_raster")
     print("PostGIS extensions enabled")
-
-
-def _load_projections(con, config: dict):
-    """Register output modeling projections from SQL files in config."""
-    projections = config.get("spatial", {}).get("projections", {})
-    if not projections:
-        print("No projections configured")
-        return
-
-    for srid, sql_file in projections.items():
-        srid = int(srid)
-
-        result = con.raw_sql(
-            f"SELECT COUNT(*) FROM spatial_ref_sys WHERE srid = {srid}"
-        ).fetchone()
-        if result[0] > 0:
-            print(f"SRID {srid} already exists, skipping")
-            continue
-
-        path = Path(sql_file)
-        if not path.exists():
-            print(f"WARNING: projection SQL file not found: {path}")
-            continue
-
-        raw = path.read_text(encoding="utf-8").strip()
-        if not raw:
-            print(f"WARNING: empty projection SQL file: {path}")
-            continue
-
-        con.raw_sql(raw)
-        print(f"SRID {srid} loaded from {path.name}")
 
 
 # ============================================================================

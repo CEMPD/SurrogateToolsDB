@@ -455,11 +455,7 @@ def main():
         logger.warning("No tables to process")
         sys.exit(0)
 
-    # Resolve SQL file: CLI arg > config projection_{srid} key
     sql_file = args.sql_file
-    if sql_file is None:
-        projections = config.get("spatial", {}).get("projections", {})
-        sql_file = projections.get(str(args.srid))
 
     # Run
     results = reproject_tables(
