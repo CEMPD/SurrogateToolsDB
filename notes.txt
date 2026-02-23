@@ -1,0 +1,1 @@
+spatial_ref_sys is a PostGIS system table that stores coordinate system definitions. 
