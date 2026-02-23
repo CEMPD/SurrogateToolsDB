@@ -2,36 +2,67 @@
 Database utilities - config loading, connection, and setup.
 
 Main functions:
-  load_config()    - load YAML config
+  load_config()    - load CSV config
   connect_db()     - connect to target database via Ibis
   setup_database() - complete database setup (create DB, PostGIS, projections)
 """
 
+import csv
 import sys
 from pathlib import Path
 import ibis
 import psycopg2
 from psycopg2 import sql
-import yaml
 
 
 def load_config(config_path: str = None) -> dict:
     """
-    Load configuration from YAML file.
+    Load configuration from flat key,value CSV file.
 
     Args:
-        config_path: Path to database_config.yaml (default: ../database_config.yaml relative to this script)
+        config_path: Path to database_config.csv (default: ../database_config.csv relative to this script)
 
     Returns:
         dict with all configuration
     """
     if config_path is None:
-        config_path = Path(__file__).parent.parent / "database_config.yaml"
+        config_path = Path(__file__).parent.parent / "database_config.csv"
     else:
         config_path = Path(config_path)
 
-    with open(config_path, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
+    flat = {}
+    with open(config_path, newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(
+            line for line in f
+            if line.strip() and not line.strip().startswith("#")
+        )
+        for row in reader:
+            flat[row["key"].strip()] = row["value"].strip()
+
+    # Collect projection_<SRID> keys
+    projections = {
+        k[len("projection_"):]: v
+        for k, v in flat.items()
+        if k.startswith("projection_") and v
+    }
+
+    return {
+        "database": {
+            "backend": flat.get("backend", "postgres"),
+            "postgres": {
+                "host":         flat.get("postgres_host", "localhost"),
+                "port":     int(flat.get("postgres_port", 5432)),
+                "database":     flat.get("postgres_database", ""),
+                "user":         flat.get("postgres_user") or None,
+                "password":     flat.get("postgres_password", ""),
+                "app_user":     flat.get("postgres_app_user") or None,
+                "app_password": flat.get("postgres_app_password", ""),
+            },
+            "duckdb":  {"path": flat.get("duckdb_path", "")},
+            "sqlite":  {"path": flat.get("sqlite_path", "")},
+        },
+        "spatial": {"projections": projections},
+    }
 
 
 def connect_db(config: dict, backend: str = None):
@@ -98,13 +129,13 @@ def setup_database(config: dict, config_path: str = None):
 
     Args:
         config: Config dict from load_config()
-        config_path: Path to database_config.yaml (needed for config rewrite)
+        config_path: Path to database_config.csv (needed for config rewrite)
 
     Returns:
         Ibis connection to the target database
     """
     if config_path is None:
-        config_path = Path(__file__).parent.parent / "database_config.yaml"
+        config_path = Path(__file__).parent.parent / "database_config.csv"
     else:
         config_path = Path(config_path)
 
@@ -187,20 +218,45 @@ def _prompt_app_user():
 
 
 def _rewrite_config(config_path, app_user, app_password):
-    """Rewrite config file: replace user/password with app_user/app_password."""
+    """Rewrite CSV config: drop user/password rows, add app_user/app_password."""
     config_path = Path(config_path)
-    with open(config_path, "r", encoding="utf-8") as f:
-        cfg = yaml.safe_load(f)
+    remove_keys = {"postgres_user", "postgres_password"}
+    update_keys = {
+        "postgres_app_user":     app_user,
+        "postgres_app_password": app_password,
+    }
 
-    pg = cfg["database"]["postgres"]
-    pg.pop("user", None)
-    pg.pop("password", None)
-    pg["app_user"] = app_user
-    pg["app_password"] = app_password
+    lines = config_path.read_text(encoding="utf-8").splitlines(keepends=True)
+    out = []
+    header_done = False
+    written = set()
 
-    with open(config_path, "w", encoding="utf-8") as f:
-        yaml.safe_dump(cfg, f, default_flow_style=False)
+    for line in lines:
+        stripped = line.strip()
+        # Pass through blanks and comments unchanged
+        if not stripped or stripped.startswith("#"):
+            out.append(line)
+            continue
+        # Pass through the "key,value" header row
+        if not header_done:
+            out.append(line)
+            header_done = True
+            continue
+        key = stripped.split(",", 1)[0].strip()
+        if key in remove_keys:
+            continue                          # drop old superuser rows
+        if key in update_keys:
+            out.append(f"{key},{update_keys[key]}\n")
+            written.add(key)
+        else:
+            out.append(line)
 
+    # Append any update_keys not already in the file
+    for key, val in update_keys.items():
+        if key not in written:
+            out.append(f"{key},{val}\n")
+
+    config_path.write_text("".join(out), encoding="utf-8")
     print(f"Config updated: now using app_user '{app_user}'")
 
 

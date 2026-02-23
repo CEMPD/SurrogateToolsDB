@@ -6,7 +6,7 @@ Usage:
                                       [--schema SCHEMA] [--dry-run]
 
 Defaults:
-    --config    ../database_config.yaml  (relative to this script)
+    --config    ../database_config.csv  (relative to this script)
     --load-list ../shapefile_load.csv    (relative to config file or root)
     --schema    public
 """
@@ -169,7 +169,7 @@ def main():
         description="Load shapefiles into PostGIS via ogr2ogr."
     )
     parser.add_argument("--config", default=None,
-                        help="Path to database_config.yaml")
+                        help="Path to database_config.csv")
     parser.add_argument("--load-list", default=None,
                         help="Path to shapefile_load.csv")
     parser.add_argument("--schema", default="public",
