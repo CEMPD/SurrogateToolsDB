@@ -189,34 +189,42 @@ def reproject_table(con, table_name: str, srid: int, geomtype: str,
         ADD COLUMN {col_name} geometry({geomtype}, {srid})
     """)
 
-    # Step 2 — transform or copy
-    already_matches = src_srid and src_srid[0] == srid
-    if already_matches:
-        # Source already in target SRID — copy geometry, skip transform
+    try:
+        # Step 2 — transform or copy
+        already_matches = src_srid and src_srid[0] == srid
+        if already_matches:
+            # Source already in target SRID — copy geometry, skip transform
+            con.raw_sql(f"""
+                UPDATE {schema}.{table_name}
+                SET {col_name} = ST_Multi(wkb_geometry)
+            """)
+        else:
+            con.raw_sql(f"""
+                UPDATE {schema}.{table_name}
+                SET {col_name} = ST_Multi(ST_Transform(wkb_geometry, {srid}))
+            """)
+
+        # Step 3 — spatial index
+        con.raw_sql(
+            f"DROP INDEX IF EXISTS {schema}.{table_name}_wkb_geometry_geom_idx"
+        )
+        con.raw_sql(
+            f"CREATE INDEX ON {schema}.{table_name} USING GIST({col_name})"
+        )
+
+        # Step 4 — validate reprojected geometry
         con.raw_sql(f"""
             UPDATE {schema}.{table_name}
-            SET {col_name} = ST_Multi(wkb_geometry)
+            SET {col_name} = ST_MakeValid({col_name})
+            WHERE NOT ST_IsValid({col_name})
         """)
-    else:
+    except Exception:
+        # Roll back the added column so next run retries from scratch
         con.raw_sql(f"""
-            UPDATE {schema}.{table_name}
-            SET {col_name} = ST_Multi(ST_Transform(wkb_geometry, {srid}))
+            ALTER TABLE {schema}.{table_name}
+            DROP COLUMN IF EXISTS {col_name}
         """)
-
-    # Step 3 — spatial index
-    con.raw_sql(
-        f"DROP INDEX IF EXISTS {schema}.{table_name}_wkb_geometry_geom_idx"
-    )
-    con.raw_sql(
-        f"CREATE INDEX ON {schema}.{table_name} USING GIST({col_name})"
-    )
-
-    # Step 4 — validate reprojected geometry
-    con.raw_sql(f"""
-        UPDATE {schema}.{table_name}
-        SET {col_name} = ST_MakeValid({col_name})
-        WHERE NOT ST_IsValid({col_name})
-    """)
+        raise
 
     elapsed = round(time.time() - start, 1)
     logger.info("%s: reprojected to SRID %d (%.1fs)", table_name, srid, elapsed)
