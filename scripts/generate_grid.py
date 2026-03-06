@@ -277,6 +277,12 @@ def resolve_srid(con, coord: dict) -> int:
     ).fetchone()
     new_srid = max_row[0]
 
+    if new_srid >= 999000:
+        raise ValueError(
+            f"Cannot create new SRID: next available ({new_srid}) "
+            f"exceeds PostGIS maximum (998999)."
+        )
+
     con.raw_sql(f"""
         INSERT INTO spatial_ref_sys (srid, srtext, proj4text)
         VALUES ({new_srid}, '{srtext}', '{proj4}')
