@@ -265,58 +265,24 @@ def resolve_srid(con, coord: dict) -> int:
 
     if result:
         srid = result[0]
-        logger.info("Found existing SRID %d matching projection", srid)
+        logger.info("Found matching SRID: %d", srid)
         return srid
 
-    # Not found — ask user for SRID
+    # Not found — create new entry
     proj4 = build_lambert_proj4(p_alp, p_bet, p_gam, ycent)
     srtext = build_lambert_srtext(p_alp, p_bet, p_gam, ycent)
 
-    logger.warning("No matching SRID found in spatial_ref_sys for projection:")
-    logger.warning("  proj4text: %s", proj4)
-
-    # Default to max existing custom SRID + 1
     max_row = con.raw_sql(
         "SELECT COALESCE(MAX(srid) + 1, 1) FROM spatial_ref_sys"
     ).fetchone()
-    default_srid = max_row[0]
+    new_srid = max_row[0]
 
-    srid_input = input(f"Enter SRID to register this projection "
-                       f"[default: {default_srid}]: ").strip()
-    srid_input = srid_input or str(default_srid)
-
-    # Validate: must be a positive integer within PostGIS range (1-998999)
-    try:
-        new_srid = int(srid_input)
-        if new_srid <= 0 or new_srid >= 999000:
-            raise ValueError
-    except ValueError:
-        raise ValueError(
-            f"Invalid SRID: '{srid_input}'. "
-            f"Must be a positive integer less than 999000."
-        )
-
-    # Duplicate check: if SRID already exists, show what's there
-    existing = con.raw_sql(f"""
-        SELECT proj4text FROM spatial_ref_sys WHERE srid = {new_srid}
-    """).fetchone()
-
-    if existing:
-        logger.error("SRID %d already exists with different projection:", new_srid)
-        logger.error("  existing: %s", existing[0])
-        logger.error("  new:      %s", proj4)
-        raise ValueError(
-            f"SRID {new_srid} already exists in spatial_ref_sys "
-            f"with a different projection. Choose a different SRID."
-        )
-
-    # Insert
     con.raw_sql(f"""
         INSERT INTO spatial_ref_sys (srid, srtext, proj4text)
         VALUES ({new_srid}, '{srtext}', '{proj4}')
     """)
 
-    logger.info("Registered new SRID %d for projection", new_srid)
+    logger.info("Creating new SRID: %d", new_srid)
     return new_srid
 
 
