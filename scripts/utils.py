@@ -111,8 +111,11 @@ def main():
     config = db_utils.load_config(args.config)
     con = db_utils.connect_db(config)
 
-    if args.command == "shapefiles":
-        list_shapefiles(con, args.schema)
+    try:
+        if args.command == "shapefiles":
+            list_shapefiles(con, args.schema)
+    finally:
+        con.disconnect()
 
 
 if __name__ == "__main__":

@@ -1,0 +1,9 @@
+# Grid definitions for generate_grid.py
+# name = table name in database
+# schema = database schema
+# srid = spatial reference ID (must already exist in spatial_ref_sys)
+# xorig, yorig = lower-left corner coordinates
+# xcellsize, ycellsize = cell size in projection units
+# cols, rows = number of columns and rows
+name,schema,srid,xorig,yorig,xcellsize,ycellsize,cols,rows
+us12k_516x444,public,900921,-2952000,-2772000,12000,12000,516,444
