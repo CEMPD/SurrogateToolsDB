@@ -4,6 +4,7 @@ Utilities.
 Usage:
     python scripts/utils.py shapefiles [--config PATH] [--schema SCHEMA]
     python scripts/utils.py shapefiles-ibis [--config PATH] [--schema SCHEMA]
+    python scripts/utils.py grids [--config PATH] [--schema SCHEMA]
 """
 
 import argparse
@@ -186,6 +187,64 @@ def list_shapefiles_ibis(con, schema: str = "public"):
     print_shapefile_summary(table_info, schema)
 
 
+GRID_COLUMNS = {"colnum", "rownum", "gridcell"}
+
+
+# ---------------------------------------------------------------------------
+# List grid tables - generic ibis
+# ---------------------------------------------------------------------------
+
+def list_grids_ibis(con, schema: str = "public"):
+    """Query and print grid tables using generic ibis APIs.
+
+    Grid tables are identified by having colnum, rownum, and gridcell columns
+    (the schema produced by generate_grid.py).
+    """
+    table_info = []
+    for table_name in sorted(con.list_tables(database=schema)):
+        table = con.table(table_name, database=schema)
+        schema_obj = table.schema()
+        col_names = set(schema_obj.names)
+        if not GRID_COLUMNS.issubset(col_names):
+            continue
+
+        _, srid = get_ibis_geom_info(schema_obj, "gridcell")
+        agg = table.aggregate(
+            cells=table.count(),
+            ncols=table.colnum.max(),
+            nrows=table.rownum.max(),
+        ).execute()
+        row = agg.iloc[0]
+
+        table_info.append({
+            "name": table_name,
+            "srid": srid,
+            "ncols": int(row["ncols"]),
+            "nrows": int(row["nrows"]),
+            "cells": int(row["cells"]),
+        })
+
+    print_grid_summary(table_info, schema)
+
+
+def print_grid_summary(table_info: list[dict], schema: str):
+    """Print a standard grid summary table."""
+    if not table_info:
+        print("No grids loaded")
+        return
+
+    print(f"\nLoaded grids (schema: {schema})\n")
+    hdr = f"{'Grid':<35} {'SRID':<8} {'Cols x Rows':<15} {'Cells':<10}"
+    print(hdr)
+    print("-" * len(hdr))
+
+    for t in table_info:
+        dims = f"{t['ncols']} x {t['nrows']}"
+        print(f"{t['name']:<35} {t['srid']:<8} {dims:<15} {t['cells']:<10}")
+
+    print(f"\n{len(table_info)} grids loaded")
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -211,6 +270,13 @@ def main():
     sp_ibis.add_argument("--config", default=None, help="Path to database_config.csv")
     sp_ibis.add_argument("--schema", default="public", help="Schema (default: public)")
 
+    sp_grids = sub.add_parser(
+        "grids",
+        help="List grid tables (ibis-based, detects colnum/rownum/gridcell)",
+    )
+    sp_grids.add_argument("--config", default=None, help="Path to database_config.csv")
+    sp_grids.add_argument("--schema", default="public", help="Schema (default: public)")
+
     args = parser.parse_args()
     if not args.command:
         parser.print_help()
@@ -229,6 +295,8 @@ def main():
             list_shapefiles(con, args.schema)
         elif args.command == "shapefiles-ibis":
             list_shapefiles_ibis(con, args.schema)
+        elif args.command == "grids":
+            list_grids_ibis(con, args.schema)
     finally:
         con.disconnect()
 
