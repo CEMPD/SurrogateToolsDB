@@ -8,8 +8,8 @@ surrogate ratio tables.
 
 Current scope (Phase 1):
   - polygon geometry with weight attribute (e.g. Population 100)
-  - Stage 1 (wp_cty) and Stage 2 (wp_cty_cell) only
-  - Stage 3-5 (numer/denom/surg) and file export are not yet implemented
+  - Stage 1 (wp_cty), Stage 2 (wp_cty_cell), and Stage 3 (numer)
+  - Stage 4-5 (denom/surg) and file export are not yet implemented
 
 Usage:
     python scripts/compute_surrogate.py 
@@ -25,6 +25,9 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
+
+import ibis
+import ibis.expr.datatypes as dt
 
 import db_utils
 import reproject
@@ -233,6 +236,210 @@ def build_jobs(
 #
 # When data_table == weight_table the clip is unnecessary — just copy rows.
 
+def get_backend_name(con) -> str:
+    """Return the ibis backend name."""
+    return getattr(con, "name", None) or "default"
+
+
+def load_table_expr(con, table_name: str, schema: str):
+    """Load a database table as an ibis expression."""
+    return con.table(table_name, database=schema)
+
+
+def ensure_columns(table_expr, table_name: str, required: list[str]):
+    """Raise a clear error if a table is missing required columns."""
+    col_names = set(table_expr.schema().names)
+    missing = [col for col in required if col not in col_names]
+    if missing:
+        raise ValueError(
+            f"{table_name}: missing required columns: {', '.join(missing)}"
+        )
+
+
+def ensure_geospatial_column(table_expr, table_name: str, column_name: str):
+    """Raise a clear error if a column is not geospatial by ibis."""
+    dtype = table_expr.schema()[column_name]
+    if isinstance(dtype, dt.GeoSpatial):
+        return
+
+    is_geospatial = getattr(dtype, "is_geospatial", None)
+    if callable(is_geospatial) and is_geospatial():
+        return
+
+    raise TypeError(
+        f"{table_name}.{column_name}: expected GeoSpatial, got {dtype}"
+    )
+
+
+def materialize_table(con, table_name: str, expr, schema: str):
+    """Create or replace a table from an ibis expression."""
+    con.create_table(table_name, obj=expr, database=schema, overwrite=True)
+
+
+def get_table_row_count(con, table_name: str, schema: str) -> int:
+    """Return a row count using the generic ibis table API."""
+    return int(load_table_expr(con, table_name, schema).count().execute())
+
+
+def get_effective_weight_column(job: SurrogateJob) -> str:
+    """Return the Stage 3/4 value column for the current rebuild.
+
+    Currently only supports polygon + weight-attribute jobs, where the
+    clipped/recomputed value is stored back in `job.weight_attribute`.
+
+    Future template will need a wider abstraction than "which column
+    to sum": Stage 4 especially may vary by source table and by expression
+    (for example weighted line length from the original weight table).
+    """
+    if not job.has_weight_attr:
+        raise NotImplementedError(
+            "effective Stage 3/4 value column is not defined yet for jobs "
+            "without a weight attribute"
+        )
+
+    return job.weight_attribute
+
+
+def postprocess_polygon_output(
+    con,
+    table_name: str,
+    geom_col: str,
+    weight_col: str,
+    srid: int,
+    schema: str = "public",
+):
+    """Run PostGIS-only geometry repair and indexing after ibis materialization."""
+    backend = get_backend_name(con)
+    if backend != "postgres":
+        logger.info(
+            "%s: backend '%s' - skipping PostGIS-only geometry repair and index",
+            table_name,
+            backend,
+        )
+        return
+
+    qualified = f"{schema}.{table_name}"
+    area_col = f"area_{srid}"
+    dens_col = f"{weight_col}_dens_{srid}"
+
+    con.raw_sql(f"""
+        UPDATE {qualified}
+        SET {geom_col} = ST_CollectionExtract(
+            ST_Multi(ST_SetSRID({geom_col}, {srid})),
+            3
+        )
+        WHERE {geom_col} IS NOT NULL
+    """)
+    con.raw_sql(f"""
+        UPDATE {qualified}
+        SET {geom_col} = ST_MakeValid({geom_col})
+        WHERE {geom_col} IS NOT NULL
+          AND NOT ST_IsValid({geom_col})
+    """)
+    con.raw_sql(f"""
+        ALTER TABLE {qualified}
+        ALTER COLUMN {geom_col}
+        TYPE geometry(MultiPolygon, {srid})
+        USING CASE
+            WHEN {geom_col} IS NULL THEN NULL
+            ELSE ST_Multi(
+                ST_CollectionExtract(
+                    ST_SetSRID({geom_col}, {srid}),
+                    3
+                )
+            )
+        END
+    """)
+    con.raw_sql(f"UPDATE {qualified} SET {area_col} = ST_Area({geom_col})")
+    con.raw_sql(f"UPDATE {qualified} SET {weight_col} = {dens_col} * {area_col}")
+    con.raw_sql(f"CREATE INDEX ON {qualified} USING GIST ({geom_col})")
+
+
+def build_polygon_wa_wp_cty_expr(con, job: SurrogateJob, schema: str):
+    """Build the Stage 1 result as an ibis expression."""
+    data_t = load_table_expr(con, job.data_table, schema).alias("data")
+    weight_t = load_table_expr(con, job.weight_table, schema).alias("weight")
+    wa = job.weight_attribute
+    da = job.data_attribute
+    srid = job.srid
+    geom = f"geom_{srid}"
+    dens_col = f"{wa}_dens_{srid}"
+    area_col = f"area_{srid}"
+
+    ensure_columns(data_t, job.data_table, [da, geom])
+    ensure_columns(weight_t, job.weight_table, [dens_col, geom])
+    ensure_geospatial_column(data_t, job.data_table, geom)
+    ensure_geospatial_column(weight_t, job.weight_table, geom)
+
+    if job.data_table == job.weight_table:
+        clipped_geom = weight_t[geom]
+        area_expr = clipped_geom.area()
+        return weight_t.select(
+            weight_t[da].name(da),
+            (weight_t[dens_col] * area_expr).name(wa),
+            weight_t[dens_col].name(dens_col),
+            area_expr.name(area_col),
+            clipped_geom.name(geom),
+        )
+
+    overlap = (
+        weight_t[geom].intersects(data_t[geom])
+        & ~weight_t[geom].touches(data_t[geom])
+    )
+    joined = data_t.join(weight_t, overlap)
+    clipped_geom = ibis.ifelse(
+        weight_t[geom].covered_by(data_t[geom]),
+        weight_t[geom],
+        weight_t[geom].intersection(data_t[geom]),
+    )
+    area_expr = clipped_geom.area()
+    return joined.select(
+        data_t[da].name(da),
+        (weight_t[dens_col] * area_expr).name(wa),
+        weight_t[dens_col].name(dens_col),
+        area_expr.name(area_col),
+        clipped_geom.name(geom),
+    )
+
+
+def build_polygon_wa_wp_cty_cell_expr(con, job: SurrogateJob, schema: str):
+    """Build the Stage 2 result as an ibis expression."""
+    wp_t = load_table_expr(con, job.wp_cty_table, schema).alias("wp")
+    grid_t = load_table_expr(con, job.grid_name, schema).alias("g")
+    wa = job.weight_attribute
+    da = job.data_attribute
+    srid = job.srid
+    geom = f"geom_{srid}"
+    dens_col = f"{wa}_dens_{srid}"
+    area_col = f"area_{srid}"
+
+    ensure_columns(wp_t, job.wp_cty_table, [da, dens_col, geom])
+    ensure_columns(grid_t, job.grid_name, ["colnum", "rownum", "gridcell"])
+    ensure_geospatial_column(wp_t, job.wp_cty_table, geom)
+    ensure_geospatial_column(grid_t, job.grid_name, "gridcell")
+
+    overlap = (
+        wp_t[geom].intersects(grid_t.gridcell)
+        & ~wp_t[geom].touches(grid_t.gridcell)
+    )
+    joined = wp_t.join(grid_t, overlap)
+    clipped_geom = ibis.ifelse(
+        wp_t[geom].covered_by(grid_t.gridcell),
+        wp_t[geom],
+        wp_t[geom].intersection(grid_t.gridcell),
+    )
+    area_expr = clipped_geom.area()
+    return joined.select(
+        wp_t[da].name(da),
+        grid_t.colnum.name("colnum"),
+        grid_t.rownum.name("rownum"),
+        area_expr.name(area_col),
+        (wp_t[dens_col] * area_expr).name(wa),
+        wp_t[dens_col].name(dens_col),
+        clipped_geom.name(geom),
+    )
+
+
 def create_wp_cty(con, job: SurrogateJob, schema: str = "public"):
     """Stage 1: intersect weight geometries with data boundaries.
 
@@ -252,77 +459,13 @@ def create_wp_cty(con, job: SurrogateJob, schema: str = "public"):
 
 def _create_polygon_wa_wp_cty(con, job: SurrogateJob, schema: str):
     """Polygon + weight-attribute path for Stage 1."""
-    tbl = f"{schema}.{job.wp_cty_table}"
-    data = f"{schema}.{job.data_table}"
-    weight = f"{schema}.{job.weight_table}"
     wa = job.weight_attribute
-    da = job.data_attribute
     srid = job.srid
     geom = f"geom_{srid}"
 
-    # Drop if exists
-    con.raw_sql(f"DROP TABLE IF EXISTS {tbl}")
-
-    # Create table
-    con.raw_sql(f"""
-        CREATE TABLE {tbl} (
-            {da}               varchar(6)       NOT NULL,
-            {wa}               double precision DEFAULT 0.0,
-            {wa}_dens_{srid}   double precision DEFAULT 0.0,
-            area_{srid}        double precision DEFAULT 0.0
-        )
-    """)
-    con.raw_sql(
-        f"SELECT AddGeometryColumn('{schema}', '{job.wp_cty_table}', "
-        f"'{geom}', {srid}, 'MultiPolygon', 2)"
-    )
-
-    # Insert: spatial intersection or direct copy
-    if job.data_table == job.weight_table:
-        # Same table — no intersection needed
-        con.raw_sql(f"""
-            INSERT INTO {tbl}
-            SELECT {da}, {wa}, {wa}_dens_{srid}, 0.0, {geom}
-            FROM {data}
-        """)
-    else:
-        # Different tables — clip weight by data boundaries
-        #   ST_CoveredBy:  weight fully inside data → use weight geometry as-is
-        #   Otherwise:     compute intersection, extract polygon collection
-        #   NOT ST_Touches: exclude edge-only contact (zero-area overlap)
-        con.raw_sql(f"""
-            INSERT INTO {tbl}
-            SELECT {data}.{da},
-                   {weight}.{wa},
-                   {weight}.{wa}_dens_{srid},
-                   0.0,
-                   CASE
-                       WHEN ST_CoveredBy({weight}.{geom}, {data}.{geom})
-                           THEN {weight}.{geom}
-                       ELSE ST_CollectionExtract(
-                                ST_Multi(ST_Intersection({weight}.{geom},
-                                                         {data}.{geom})),
-                                3)
-                   END
-            FROM {data}
-            JOIN {weight}
-                ON (NOT ST_Touches({weight}.{geom}, {data}.{geom})
-                    AND ST_Intersects({weight}.{geom}, {data}.{geom}))
-        """)
-
-    # Post-processing (order matters):
-    # 1. Fix any invalid geometries produced by intersection
-    con.raw_sql(f"""
-        UPDATE {tbl}
-        SET {geom} = ST_MakeValid({geom})
-        WHERE NOT ST_IsValid({geom})
-    """)
-    # 2. Recompute area after clipping
-    con.raw_sql(f"UPDATE {tbl} SET area_{srid} = ST_Area({geom})")
-    # 3. Recompute weight = density × new area
-    con.raw_sql(f"UPDATE {tbl} SET {wa} = {wa}_dens_{srid} * area_{srid}")
-    # 4. Spatial index for Stage 2
-    con.raw_sql(f"CREATE INDEX ON {tbl} USING GIST ({geom})")
+    expr = build_polygon_wa_wp_cty_expr(con, job, schema)
+    materialize_table(con, job.wp_cty_table, expr, schema)
+    postprocess_polygon_output(con, job.wp_cty_table, geom, wa, srid, schema)
 
 
 # ---------------------------------------------------------------------------
@@ -354,62 +497,49 @@ def create_wp_cty_cell(con, job: SurrogateJob, schema: str = "public"):
 
 def _create_polygon_wa_wp_cty_cell(con, job: SurrogateJob, schema: str):
     """Polygon + weight-attribute path for Stage 2."""
-    tbl = f"{schema}.{job.wp_cty_cell_table}"
-    wp = f"{schema}.{job.wp_cty_table}"
-    grid = f"{schema}.{job.grid_name}"
     wa = job.weight_attribute
-    da = job.data_attribute
     srid = job.srid
     geom = f"geom_{srid}"
 
-    # Drop if exists
-    con.raw_sql(f"DROP TABLE IF EXISTS {tbl}")
-
-    # Create table — adds colnum/rownum from grid
-    con.raw_sql(f"""
-        CREATE TABLE {tbl} (
-            {da}               varchar(6)       NOT NULL,
-            colnum             integer          NOT NULL,
-            rownum             integer          NOT NULL,
-            area_{srid}        double precision DEFAULT 1.0,
-            {wa}               double precision DEFAULT 0.0,
-            {wa}_dens_{srid}   double precision DEFAULT 0.0
-        )
-    """)
-    con.raw_sql(
-        f"SELECT AddGeometryColumn('{schema}', '{job.wp_cty_cell_table}', "
-        f"'{geom}', {srid}, 'MultiPolygon', 2)"
+    expr = build_polygon_wa_wp_cty_cell_expr(con, job, schema)
+    materialize_table(con, job.wp_cty_cell_table, expr, schema)
+    postprocess_polygon_output(
+        con, job.wp_cty_cell_table, geom, wa, srid, schema
     )
 
-    # Insert: clip wp_cty geometries to grid cells
-    con.raw_sql(f"""
-        INSERT INTO {tbl}
-        SELECT wp.{da}, g.colnum, g.rownum,
-               0.0,
-               wp.{wa},
-               wp.{wa}_dens_{srid},
-               CASE
-                   WHEN ST_CoveredBy(wp.{geom}, g.gridcell)
-                       THEN wp.{geom}
-                   ELSE ST_CollectionExtract(
-                            ST_Multi(ST_Intersection(wp.{geom}, g.gridcell)),
-                            3)
-               END
-        FROM {wp} wp
-        JOIN {grid} g
-            ON (NOT ST_Touches(wp.{geom}, g.gridcell)
-                AND ST_Intersects(wp.{geom}, g.gridcell))
-    """)
 
-    # Post-processing — same pattern as Stage 1
-    con.raw_sql(f"""
-        UPDATE {tbl}
-        SET {geom} = ST_MakeValid({geom})
-        WHERE NOT ST_IsValid({geom})
-    """)
-    con.raw_sql(f"UPDATE {tbl} SET area_{srid} = ST_Area({geom})")
-    con.raw_sql(f"UPDATE {tbl} SET {wa} = {wa}_dens_{srid} * area_{srid}")
-    con.raw_sql(f"CREATE INDEX ON {tbl} USING GIST ({geom})")
+# ---------------------------------------------------------------------------
+# Stage 3: numer — aggregate Stage 2 values to grid cells per data unit
+# ---------------------------------------------------------------------------
+#
+# Purpose: summarize the Stage 2 overlay into one row per
+# (data_attribute, colnum, rownum), matching legacy `numer_*`.
+#
+# This stage is relational only: it should not depend on backend-specific
+# geometry repair or index creation.
+
+def build_numer_expr(con, job: SurrogateJob, schema: str):
+    """Build the Stage 3 numerator result as an ibis expression."""
+    cell_t = load_table_expr(con, job.wp_cty_cell_table, schema)
+    da = job.data_attribute
+    value_col = get_effective_weight_column(job)
+
+    ensure_columns(
+        cell_t,
+        job.wp_cty_cell_table,
+        [da, "colnum", "rownum", value_col],
+    )
+
+    numer_t = cell_t.group_by([da, "colnum", "rownum"]).aggregate(
+        numer=cell_t[value_col].sum()
+    )
+    return numer_t.select(da, "colnum", "rownum", "numer")
+
+
+def create_numer(con, job: SurrogateJob, schema: str = "public"):
+    """Stage 3: aggregate Stage 2 rows into grid-cell numerators."""
+    expr = build_numer_expr(con, job, schema)
+    materialize_table(con, job.numer_table, expr, schema)
 
 
 # ---------------------------------------------------------------------------
@@ -419,21 +549,24 @@ def _create_polygon_wa_wp_cty_cell(con, job: SurrogateJob, schema: str):
 def compute_surrogate(con, job: SurrogateJob, schema: str = "public") -> dict:
     """Run available stages for one surrogate job.
 
-    Currently runs Stage 1 (wp_cty) and Stage 2 (wp_cty_cell).
-    Stage 3-5 and file export are not yet implemented.
+    Currently runs Stage 1 (wp_cty), Stage 2 (wp_cty_cell), and
+    Stage 3 (numer). Stage 4-5 and file export are not yet implemented.
     """
     start = time.time()
     logger.info("Computing surrogate %d (%s)...",
                 job.surrogate_code, job.surrogate_name)
 
     try:
+        if job.has_filter:
+            logger.warning(
+                "  FILTER FUNCTION is not applied yet in the rebuild: %s",
+                job.filter_function,
+            )
         # Stage 1: weight × data intersection
         logger.info("  Stage 1: create_wp_cty (weight-data intersection)")
         t1 = time.time()
         create_wp_cty(con, job, schema)
-        cnt1 = con.raw_sql(
-            f"SELECT COUNT(*) FROM {schema}.{job.wp_cty_table}"
-        ).fetchone()[0]
+        cnt1 = get_table_row_count(con, job.wp_cty_table, schema)
         logger.info("  Stage 1 complete: %s (%d rows, %.1fs)",
                      job.wp_cty_table, cnt1, time.time() - t1)
 
@@ -441,13 +574,19 @@ def compute_surrogate(con, job: SurrogateJob, schema: str = "public") -> dict:
         logger.info("  Stage 2: create_wp_cty_cell (grid intersection)")
         t2 = time.time()
         create_wp_cty_cell(con, job, schema)
-        cnt2 = con.raw_sql(
-            f"SELECT COUNT(*) FROM {schema}.{job.wp_cty_cell_table}"
-        ).fetchone()[0]
+        cnt2 = get_table_row_count(con, job.wp_cty_cell_table, schema)
         logger.info("  Stage 2 complete: %s (%d rows, %.1fs)",
                      job.wp_cty_cell_table, cnt2, time.time() - t2)
 
-        # TODO: Stage 3-5 (numer, denom, surg) and file export
+        # Stage 3: numerator aggregation
+        logger.info("  Stage 3: create_numer (grid-cell numerator aggregation)")
+        t3 = time.time()
+        create_numer(con, job, schema)
+        cnt3 = get_table_row_count(con, job.numer_table, schema)
+        logger.info("  Stage 3 complete: %s (%d rows, %.1fs)",
+                    job.numer_table, cnt3, time.time() - t3)
+
+        # TODO: Stage 4-5 (denom, surg) and file export
 
         elapsed = round(time.time() - start, 1)
         logger.info("Surrogate %d done (%.1fs)", job.surrogate_code, elapsed)
@@ -457,6 +596,7 @@ def compute_surrogate(con, job: SurrogateJob, schema: str = "public") -> dict:
             "status": "success",
             "wp_cty_rows": cnt1,
             "wp_cty_cell_rows": cnt2,
+            "numer_rows": cnt3,
             "elapsed": elapsed,
         }
 
@@ -484,7 +624,8 @@ def print_summary(results: list[dict]):
           f"Failed: {len(failed)}")
     for r in succeeded:
         print(f"  {r['code']} ({r['name']}): wp_cty={r['wp_cty_rows']} "
-              f"wp_cty_cell={r['wp_cty_cell_rows']} ({r['elapsed']}s)")
+              f"wp_cty_cell={r['wp_cty_cell_rows']} "
+              f"numer={r['numer_rows']} ({r['elapsed']}s)")
     if failed:
         print("\nFailed:")
         for r in failed:
@@ -498,7 +639,7 @@ def print_summary(results: list[dict]):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Compute spatial surrogates (Stage 1-2)."
+        description="Compute spatial surrogates (Stage 1-3)."
     )
     parser.add_argument(
         "--control-file", required=True,
@@ -587,3 +728,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
