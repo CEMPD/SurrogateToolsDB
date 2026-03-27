@@ -7,7 +7,7 @@ shapefile_catalog) and executes PostGIS spatial operations to produce
 surrogate ratio tables.
 
 Current scope (Phase 1):
-  - polygon geometry with weight attribute (e.g. Population 100)
+  - polygon geometry with and without weight attributes
   - Stage 1 (wp_cty), Stage 2 (wp_cty_cell), and Stage 3 (numer)
   - Stage 4-5 (denom/surg) and file export are not yet implemented
 
@@ -511,24 +511,26 @@ def get_effective_measure_column(job: SurrogateJob) -> str:
     to sum": Stage 4 especially may vary by source table and by expression
     (for example weighted line length from the original weight table).
     """
-    if not job.has_weight_attr:
-        raise NotImplementedError(
-            "effective Stage 3/4 value column is not defined yet for jobs "
-            "without a weight attribute"
-        )
+    if job.geom_family == "polygon":
+        if job.has_weight_attr:
+            return job.weight_attribute
+        return f"area_{job.srid}"
 
-    return job.weight_attribute
+    raise NotImplementedError(
+        "effective Stage 3/4 measure column is not defined yet for "
+        f"geom_family='{job.geom_family}'"
+    )
 
 
 def postprocess_polygon_output(
     con,
     table_name: str,
     geom_col: str,
-    weight_col: str,
+    weight_col: str | None,
     srid: int,
     schema: str = "public",
 ):
-    """Run PostGIS-only geometry repair and indexing after ibis materialization."""
+    """Run PostGIS-only polygon repair and derived-column updates."""
     backend = get_backend_name(con)
     if backend != "postgres":
         logger.info(
@@ -540,7 +542,6 @@ def postprocess_polygon_output(
 
     qualified = f"{schema}.{table_name}"
     area_col = f"area_{srid}"
-    dens_col = f"{weight_col}_dens_{srid}"
 
     con.raw_sql(f"""
         UPDATE {qualified}
@@ -571,7 +572,11 @@ def postprocess_polygon_output(
         END
     """)
     con.raw_sql(f"UPDATE {qualified} SET {area_col} = ST_Area({geom_col})")
-    con.raw_sql(f"UPDATE {qualified} SET {weight_col} = {dens_col} * {area_col}")
+    if weight_col:
+        dens_col = f"{weight_col}_dens_{srid}"
+        con.raw_sql(
+            f"UPDATE {qualified} SET {weight_col} = {dens_col} * {area_col}"
+        )
     con.raw_sql(f"CREATE INDEX ON {qualified} USING GIST ({geom_col})")
 
 
@@ -664,21 +669,99 @@ def build_polygon_wa_wp_cty_cell_expr(con, job: SurrogateJob, schema: str):
     )
 
 
+def build_polygon_no_wa_wp_cty_expr(con, job: SurrogateJob, schema: str):
+    """Build the Stage 1 area-only polygon result as an ibis expression."""
+    data_t = load_table_expr(con, job.data_table, schema).alias("data")
+    weight_t = apply_filter_function(
+        load_table_expr(con, job.weight_table, schema),
+        job.filter_function,
+        job.weight_table,
+    ).alias("weight")
+    da = job.data_attribute
+    srid = job.srid
+    geom = f"geom_{srid}"
+    area_col = f"area_{srid}"
+
+    ensure_columns(data_t, job.data_table, [da, geom])
+    ensure_columns(weight_t, job.weight_table, [geom])
+    ensure_geospatial_column(data_t, job.data_table, geom)
+    ensure_geospatial_column(weight_t, job.weight_table, geom)
+
+    if job.data_table == job.weight_table:
+        clipped_geom = weight_t[geom]
+        area_expr = clipped_geom.area()
+        return weight_t.select(
+            weight_t[da].name(da),
+            area_expr.name(area_col),
+            clipped_geom.name(geom),
+        )
+
+    overlap = (
+        weight_t[geom].intersects(data_t[geom])
+        & ~weight_t[geom].touches(data_t[geom])
+    )
+    joined = data_t.join(weight_t, overlap)
+    clipped_geom = ibis.ifelse(
+        weight_t[geom].covered_by(data_t[geom]),
+        weight_t[geom],
+        weight_t[geom].intersection(data_t[geom]),
+    )
+    area_expr = clipped_geom.area()
+    return joined.select(
+        data_t[da].name(da),
+        area_expr.name(area_col),
+        clipped_geom.name(geom),
+    )
+
+
+def build_polygon_no_wa_wp_cty_cell_expr(con, job: SurrogateJob, schema: str):
+    """Build the Stage 2 area-only polygon result as an ibis expression."""
+    wp_t = load_table_expr(con, job.wp_cty_table, schema).alias("wp")
+    grid_t = load_table_expr(con, job.grid_name, schema).alias("g")
+    da = job.data_attribute
+    srid = job.srid
+    geom = f"geom_{srid}"
+    area_col = f"area_{srid}"
+
+    ensure_columns(wp_t, job.wp_cty_table, [da, geom])
+    ensure_columns(grid_t, job.grid_name, ["colnum", "rownum", "gridcell"])
+    ensure_geospatial_column(wp_t, job.wp_cty_table, geom)
+    ensure_geospatial_column(grid_t, job.grid_name, "gridcell")
+
+    overlap = (
+        wp_t[geom].intersects(grid_t.gridcell)
+        & ~wp_t[geom].touches(grid_t.gridcell)
+    )
+    joined = wp_t.join(grid_t, overlap)
+    clipped_geom = ibis.ifelse(
+        wp_t[geom].covered_by(grid_t.gridcell),
+        wp_t[geom],
+        wp_t[geom].intersection(grid_t.gridcell),
+    )
+    area_expr = clipped_geom.area()
+    return joined.select(
+        wp_t[da].name(da),
+        grid_t.colnum.name("colnum"),
+        grid_t.rownum.name("rownum"),
+        area_expr.name(area_col),
+        clipped_geom.name(geom),
+    )
+
+
 def create_wp_cty(con, job: SurrogateJob, schema: str = "public"):
     """Stage 1: intersect weight geometries with data boundaries.
 
-    Only the polygon + weight-attribute path is implemented. template_polygon_noFF_withWA.csh
+    Current scope supports polygon geometry with or without a weight attribute.
     """
     if job.geom_family != "polygon":
         raise NotImplementedError(
             f"geom_family='{job.geom_family}' not yet supported in create_wp_cty"
         )
-    if not job.has_weight_attr:
-        raise NotImplementedError(
-            "polygon without weight attribute not yet supported in create_wp_cty"
-        )
+    if job.has_weight_attr:
+        _create_polygon_wa_wp_cty(con, job, schema)
+        return
 
-    _create_polygon_wa_wp_cty(con, job, schema)
+    _create_polygon_no_wa_wp_cty(con, job, schema)
 
 
 def _create_polygon_wa_wp_cty(con, job: SurrogateJob, schema: str):
@@ -692,6 +775,16 @@ def _create_polygon_wa_wp_cty(con, job: SurrogateJob, schema: str):
     postprocess_polygon_output(con, job.wp_cty_table, geom, wa, srid, schema)
 
 
+def _create_polygon_no_wa_wp_cty(con, job: SurrogateJob, schema: str):
+    """Polygon + no-weight-attribute path for Stage 1."""
+    srid = job.srid
+    geom = f"geom_{srid}"
+
+    expr = build_polygon_no_wa_wp_cty_expr(con, job, schema)
+    materialize_table(con, job.wp_cty_table, expr, schema)
+    postprocess_polygon_output(con, job.wp_cty_table, geom, None, srid, schema)
+
+
 # ---------------------------------------------------------------------------
 # Stage 2: wp_cty_cell — intersect wp_cty with grid cells
 # ---------------------------------------------------------------------------
@@ -703,20 +796,18 @@ def _create_polygon_wa_wp_cty(con, job: SurrogateJob, schema: str):
 def create_wp_cty_cell(con, job: SurrogateJob, schema: str = "public"):
     """Stage 2: intersect wp_cty with grid cells.
 
-    Only the polygon + weight-attribute path is implemented.
+    Current scope supports polygon geometry with or without a weight attribute.
     """
     if job.geom_family != "polygon":
         raise NotImplementedError(
             f"geom_family='{job.geom_family}' not yet supported in "
             "create_wp_cty_cell"
         )
-    if not job.has_weight_attr:
-        raise NotImplementedError(
-            "polygon without weight attribute not yet supported in "
-            "create_wp_cty_cell"
-        )
+    if job.has_weight_attr:
+        _create_polygon_wa_wp_cty_cell(con, job, schema)
+        return
 
-    _create_polygon_wa_wp_cty_cell(con, job, schema)
+    _create_polygon_no_wa_wp_cty_cell(con, job, schema)
 
 
 def _create_polygon_wa_wp_cty_cell(con, job: SurrogateJob, schema: str):
@@ -729,6 +820,18 @@ def _create_polygon_wa_wp_cty_cell(con, job: SurrogateJob, schema: str):
     materialize_table(con, job.wp_cty_cell_table, expr, schema)
     postprocess_polygon_output(
         con, job.wp_cty_cell_table, geom, wa, srid, schema
+    )
+
+
+def _create_polygon_no_wa_wp_cty_cell(con, job: SurrogateJob, schema: str):
+    """Polygon + no-weight-attribute path for Stage 2."""
+    srid = job.srid
+    geom = f"geom_{srid}"
+
+    expr = build_polygon_no_wa_wp_cty_cell_expr(con, job, schema)
+    materialize_table(con, job.wp_cty_cell_table, expr, schema)
+    postprocess_polygon_output(
+        con, job.wp_cty_cell_table, geom, None, srid, schema
     )
 
 
@@ -746,7 +849,7 @@ def build_numer_expr(con, job: SurrogateJob, schema: str):
     """Build the Stage 3 numerator result as an ibis expression."""
     cell_t = load_table_expr(con, job.wp_cty_cell_table, schema)
     da = job.data_attribute
-    value_col = get_effective_weight_column(job)
+    value_col = get_effective_measure_column(job)
 
     ensure_columns(
         cell_t,
@@ -781,11 +884,6 @@ def compute_surrogate(con, job: SurrogateJob, schema: str = "public") -> dict:
                 job.surrogate_code, job.surrogate_name)
 
     try:
-        if job.has_filter:
-            logger.warning(
-                "  FILTER FUNCTION is not applied yet in the rebuild: %s",
-                job.filter_function,
-            )
         # Stage 1: weight × data intersection
         logger.info("  Stage 1: create_wp_cty (weight-data intersection)")
         t1 = time.time()
@@ -952,4 +1050,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
