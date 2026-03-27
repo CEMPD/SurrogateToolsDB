@@ -21,10 +21,12 @@ Usage:
 import argparse
 import csv
 import logging
+import re
 import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import ibis
 import ibis.expr.datatypes as dt
@@ -281,13 +283,231 @@ def get_table_row_count(con, table_name: str, schema: str) -> int:
     return int(load_table_expr(con, table_name, schema).count().execute())
 
 
-def get_effective_weight_column(job: SurrogateJob) -> str:
-    """Return the Stage 3/4 value column for the current rebuild.
+class FilterParseError(ValueError):
+    """Raised when a FILTER FUNCTION cannot be parsed into an ibis predicate."""
 
-    Currently only supports polygon + weight-attribute jobs, where the
-    clipped/recomputed value is stored back in `job.weight_attribute`.
 
-    Future template will need a wider abstraction than "which column
+@dataclass(frozen=True)
+class FilterToken:
+    """One token from a FILTER FUNCTION expression."""
+
+    kind: str
+    value: str
+    pos: int
+
+
+_FILTER_TOKEN_RE = re.compile(
+    r"""
+    (?P<SPACE>\s+)
+    | (?P<STRING>'(?:''|[^'])*')
+    | (?P<NUMBER>-?\d+(?:\.\d+)?)
+    | (?P<OP><>|!=|>=|<=|=|>|<)
+    | (?P<LPAREN>\()
+    | (?P<RPAREN>\))
+    | (?P<COMMA>,)
+    | (?P<IDENT>[A-Za-z_][A-Za-z0-9_]*)
+    | (?P<MISMATCH>.)
+    """,
+    re.VERBOSE,
+)
+
+
+def tokenize_filter_function(filter_sql: str) -> list[FilterToken]:
+    """Tokenize a legacy FILTER FUNCTION string."""
+    tokens: list[FilterToken] = []
+    for match in _FILTER_TOKEN_RE.finditer(filter_sql):
+        kind = match.lastgroup
+        assert kind is not None
+
+        if kind == "SPACE":
+            continue
+        if kind == "MISMATCH":
+            bad = match.group()
+            raise FilterParseError(
+                f"unsupported token {bad!r} at position {match.start()}"
+            )
+
+        value = match.group()
+        if kind == "IDENT":
+            upper = value.upper()
+            if upper in {"AND", "OR", "IN"}:
+                kind = upper
+            elif upper == "NOT":
+                raise FilterParseError(
+                    "FILTER FUNCTION does not support NOT yet"
+                )
+
+        tokens.append(FilterToken(kind, value, match.start()))
+
+    tokens.append(FilterToken("EOF", "", len(filter_sql)))
+    return tokens
+
+
+def resolve_filter_column(table_expr, table_name: str, column_name: str):
+    """Resolve a FILTER FUNCTION column name against a table schema."""
+    schema_names = list(table_expr.schema().names)
+    if column_name in schema_names:
+        return table_expr[column_name]
+
+    folded = [name for name in schema_names if name.lower() == column_name.lower()]
+    if len(folded) == 1:
+        return table_expr[folded[0]]
+    if len(folded) > 1:
+        raise FilterParseError(
+            f"{table_name}: ambiguous FILTER FUNCTION column {column_name!r}"
+        )
+
+    raise FilterParseError(
+        f"{table_name}: FILTER FUNCTION references unknown column {column_name!r}"
+    )
+
+
+class FilterParser:
+    """Recursive-descent parser for the supported FILTER FUNCTION subset."""
+
+    def __init__(self, table_expr, table_name: str, tokens: list[FilterToken]):
+        self.table_expr = table_expr
+        self.table_name = table_name
+        self.tokens = tokens
+        self.index = 0
+
+    def current(self) -> FilterToken:
+        return self.tokens[self.index]
+
+    def advance(self) -> FilterToken:
+        token = self.current()
+        self.index += 1
+        return token
+
+    def match(self, *kinds: str) -> FilterToken | None:
+        token = self.current()
+        if token.kind in kinds:
+            self.index += 1
+            return token
+        return None
+
+    def expect(self, *kinds: str) -> FilterToken:
+        token = self.current()
+        if token.kind not in kinds:
+            expected = " or ".join(kinds)
+            raise FilterParseError(
+                f"expected {expected} at position {token.pos}, got {token.value!r}"
+            )
+        self.index += 1
+        return token
+
+    def parse(self):
+        expr = self.parse_or()
+        self.expect("EOF")
+        return expr
+
+    def parse_or(self):
+        expr = self.parse_and()
+        while self.match("OR"):
+            expr = expr | self.parse_and()
+        return expr
+
+    def parse_and(self):
+        expr = self.parse_primary()
+        while self.match("AND"):
+            expr = expr & self.parse_primary()
+        return expr
+
+    def parse_primary(self):
+        if self.match("LPAREN"):
+            expr = self.parse_or()
+            self.expect("RPAREN")
+            return expr
+        return self.parse_predicate()
+
+    def parse_predicate(self):
+        column_token = self.expect("IDENT")
+        column = resolve_filter_column(
+            self.table_expr, self.table_name, column_token.value
+        )
+
+        if self.match("IN"):
+            self.expect("LPAREN")
+            values = [self.parse_literal()]
+            while self.match("COMMA"):
+                values.append(self.parse_literal())
+            self.expect("RPAREN")
+            return column.isin(values)
+
+        op_token = self.expect("OP")
+        value = self.parse_literal()
+        return self.apply_comparison(column, op_token.value, value, op_token.pos)
+
+    def parse_literal(self) -> Any:
+        token = self.current()
+        if token.kind == "NUMBER":
+            self.advance()
+            return float(token.value) if "." in token.value else int(token.value)
+        if token.kind == "STRING":
+            self.advance()
+            return token.value[1:-1].replace("''", "'")
+        if token.kind == "IDENT":
+            upper = token.value.upper()
+            if upper == "TRUE":
+                self.advance()
+                return True
+            if upper == "FALSE":
+                self.advance()
+                return False
+            if upper == "NULL":
+                raise FilterParseError(
+                    "FILTER FUNCTION does not support NULL comparisons yet"
+                )
+
+        raise FilterParseError(
+            f"expected literal at position {token.pos}, got {token.value!r}"
+        )
+
+    @staticmethod
+    def apply_comparison(column, operator: str, value: Any, pos: int):
+        """Convert a comparison operator into the matching ibis expression."""
+        if operator == "=":
+            return column == value
+        if operator in {"!=", "<>"}:
+            return column != value
+        if operator == ">":
+            return column > value
+        if operator == ">=":
+            return column >= value
+        if operator == "<":
+            return column < value
+        if operator == "<=":
+            return column <= value
+
+        raise FilterParseError(
+            f"unsupported comparison operator {operator!r} at position {pos}"
+        )
+
+
+def build_filter_predicate(table_expr, filter_sql: str, table_name: str):
+    """Parse a FILTER FUNCTION string into an ibis boolean predicate."""
+    tokens = tokenize_filter_function(filter_sql)
+    return FilterParser(table_expr, table_name, tokens).parse()
+
+
+def apply_filter_function(table_expr, filter_sql: str, table_name: str):
+    """Apply a supported FILTER FUNCTION to a table expression."""
+    if not filter_sql:
+        return table_expr
+
+    logger.info("  Applying FILTER FUNCTION to %s: %s", table_name, filter_sql)
+    predicate = build_filter_predicate(table_expr, filter_sql, table_name)
+    return table_expr.filter(predicate)
+
+
+def get_effective_measure_column(job: SurrogateJob) -> str:
+    """Return the Stage 3/4 measure column for the current rebuild scope.
+
+    Current scope supports polygon jobs with either:
+      - weight attribute: use the clipped/recomputed value column
+      - no weight attribute: use clipped polygon area
+
+    Future template families will need a wider abstraction than "which column
     to sum": Stage 4 especially may vary by source table and by expression
     (for example weighted line length from the original weight table).
     """
@@ -358,7 +578,11 @@ def postprocess_polygon_output(
 def build_polygon_wa_wp_cty_expr(con, job: SurrogateJob, schema: str):
     """Build the Stage 1 result as an ibis expression."""
     data_t = load_table_expr(con, job.data_table, schema).alias("data")
-    weight_t = load_table_expr(con, job.weight_table, schema).alias("weight")
+    weight_t = apply_filter_function(
+        load_table_expr(con, job.weight_table, schema),
+        job.filter_function,
+        job.weight_table,
+    ).alias("weight")
     wa = job.weight_attribute
     da = job.data_attribute
     srid = job.srid
