@@ -8,8 +8,8 @@ surrogate ratio tables.
 
 Current scope (Phase 1):
   - polygon geometry with and without weight attributes
-  - Stage 1 (wp_cty), Stage 2 (wp_cty_cell), and Stage 3 (numer)
-  - Stage 4-5 (denom/surg) and file export are not yet implemented
+  - Stage 1 (wp_cty), Stage 2 (wp_cty_cell), Stage 3 (numer), and Stage 4 (denom)
+  - Stage 5 (surg) and file export are not yet implemented
 
 Usage:
     python scripts/compute_surrogate.py 
@@ -870,14 +870,49 @@ def create_numer(con, job: SurrogateJob, schema: str = "public"):
 
 
 # ---------------------------------------------------------------------------
+# Stage 4: denom — aggregate Stage 1 values per data unit
+# ---------------------------------------------------------------------------
+#
+# Purpose: summarize Stage 1 into one row per data unit, matching legacy
+# `denom_*` for the currently supported polygon branches.
+#
+# Future geometry may need a different source table or measure
+# expression; current scope keeps this on `wp_cty_*`.
+
+def build_denom_expr(con, job: SurrogateJob, schema: str):
+    """Build the Stage 4 denominator result as an ibis expression."""
+    wp_t = load_table_expr(con, job.wp_cty_table, schema)
+    da = job.data_attribute
+    value_col = get_effective_measure_column(job)
+
+    ensure_columns(
+        wp_t,
+        job.wp_cty_table,
+        [da, value_col],
+    )
+
+    denom_t = wp_t.group_by([da]).aggregate(
+        denom=wp_t[value_col].sum()
+    )
+    return denom_t.select(da, "denom")
+
+
+def create_denom(con, job: SurrogateJob, schema: str = "public"):
+    """Stage 4: aggregate Stage 1 rows into per-data-unit denominators."""
+    expr = build_denom_expr(con, job, schema)
+    materialize_table(con, job.denom_table, expr, schema)
+
+
+# ---------------------------------------------------------------------------
 # Orchestrator
 # ---------------------------------------------------------------------------
 
 def compute_surrogate(con, job: SurrogateJob, schema: str = "public") -> dict:
     """Run available stages for one surrogate job.
 
-    Currently runs Stage 1 (wp_cty), Stage 2 (wp_cty_cell), and
-    Stage 3 (numer). Stage 4-5 and file export are not yet implemented.
+    Currently runs Stage 1 (wp_cty), Stage 2 (wp_cty_cell),
+    Stage 3 (numer), and Stage 4 (denom). Stage 5 and file export
+    are not yet implemented.
     """
     start = time.time()
     logger.info("Computing surrogate %d (%s)...",
@@ -908,7 +943,15 @@ def compute_surrogate(con, job: SurrogateJob, schema: str = "public") -> dict:
         logger.info("  Stage 3 complete: %s (%d rows, %.1fs)",
                     job.numer_table, cnt3, time.time() - t3)
 
-        # TODO: Stage 4-5 (denom, surg) and file export
+        # Stage 4: denominator aggregation
+        logger.info("  Stage 4: create_denom (data-unit denominator aggregation)")
+        t4 = time.time()
+        create_denom(con, job, schema)
+        cnt4 = get_table_row_count(con, job.denom_table, schema)
+        logger.info("  Stage 4 complete: %s (%d rows, %.1fs)",
+                    job.denom_table, cnt4, time.time() - t4)
+
+        # TODO: Stage 5 (surg) and file export
 
         elapsed = round(time.time() - start, 1)
         logger.info("Surrogate %d done (%.1fs)", job.surrogate_code, elapsed)
@@ -919,6 +962,7 @@ def compute_surrogate(con, job: SurrogateJob, schema: str = "public") -> dict:
             "wp_cty_rows": cnt1,
             "wp_cty_cell_rows": cnt2,
             "numer_rows": cnt3,
+            "denom_rows": cnt4,
             "elapsed": elapsed,
         }
 
@@ -947,7 +991,8 @@ def print_summary(results: list[dict]):
     for r in succeeded:
         print(f"  {r['code']} ({r['name']}): wp_cty={r['wp_cty_rows']} "
               f"wp_cty_cell={r['wp_cty_cell_rows']} "
-              f"numer={r['numer_rows']} ({r['elapsed']}s)")
+              f"numer={r['numer_rows']} "
+              f"denom={r['denom_rows']} ({r['elapsed']}s)")
     if failed:
         print("\nFailed:")
         for r in failed:
@@ -961,7 +1006,7 @@ def print_summary(results: list[dict]):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Compute spatial surrogates (Stage 1-3)."
+        description="Compute spatial surrogates (Stage 1-4)."
     )
     parser.add_argument(
         "--control-file", required=True,
