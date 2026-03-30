@@ -8,8 +8,9 @@ surrogate ratio tables.
 
 Current scope (Phase 1):
   - polygon geometry with and without weight attributes
-  - Stage 1 (wp_cty), Stage 2 (wp_cty_cell), Stage 3 (numer), and Stage 4 (denom)
-  - Stage 5 (surg) and file export are not yet implemented
+  - Stage 1 (wp_cty), Stage 2 (wp_cty_cell), Stage 3 (numer),
+    Stage 4 (denom), and Stage 5 (surg)
+  - file export is not yet implemented
 
 Usage:
     python scripts/compute_surrogate.py 
@@ -904,6 +905,51 @@ def create_denom(con, job: SurrogateJob, schema: str = "public"):
 
 
 # ---------------------------------------------------------------------------
+# Stage 5: surg - join numerators to denominators and compute ratios
+# ---------------------------------------------------------------------------
+#
+# Purpose: produce final surrogate ratios from the Stage 3/4 relational
+# outputs. This stage only needs numer and denom tables with the expected columns from Stage 3/4.
+
+
+def build_surg_expr(con, job: SurrogateJob, schema: str):
+    """Build the Stage 5 surrogate ratio result as an ibis expression."""
+    numer_t = load_table_expr(con, job.numer_table, schema).alias("n")
+    denom_t = load_table_expr(con, job.denom_table, schema).alias("d")
+    da = job.data_attribute
+
+    ensure_columns(
+        numer_t,
+        job.numer_table,
+        [da, "colnum", "rownum", "numer"],
+    )
+    ensure_columns(
+        denom_t,
+        job.denom_table,
+        [da, "denom"],
+    )
+
+    joined = numer_t.join(denom_t, numer_t[da] == denom_t[da])
+    return joined.filter(
+        (numer_t["numer"] != 0) & (denom_t["denom"] != 0)
+    ).select(
+        ibis.literal(job.surrogate_code).cast("int32").name("surg_code"),
+        numer_t[da].name(da),
+        numer_t["colnum"].name("colnum"),
+        numer_t["rownum"].name("rownum"),
+        (numer_t["numer"] / denom_t["denom"]).name("surg"),
+        numer_t["numer"].name("numer"),
+        denom_t["denom"].name("denom"),
+    )
+
+
+def create_surg(con, job: SurrogateJob, schema: str = "public"):
+    """Stage 5: join Stage 3/4 outputs and compute final surrogate ratios."""
+    expr = build_surg_expr(con, job, schema)
+    materialize_table(con, job.surg_table, expr, schema)
+
+
+# ---------------------------------------------------------------------------
 # Orchestrator
 # ---------------------------------------------------------------------------
 
@@ -911,8 +957,8 @@ def compute_surrogate(con, job: SurrogateJob, schema: str = "public") -> dict:
     """Run available stages for one surrogate job.
 
     Currently runs Stage 1 (wp_cty), Stage 2 (wp_cty_cell),
-    Stage 3 (numer), and Stage 4 (denom). Stage 5 and file export
-    are not yet implemented.
+    Stage 3 (numer), Stage 4 (denom), and Stage 5 (surg).
+    File export is not yet implemented.
     """
     start = time.time()
     logger.info("Computing surrogate %d (%s)...",
@@ -951,7 +997,13 @@ def compute_surrogate(con, job: SurrogateJob, schema: str = "public") -> dict:
         logger.info("  Stage 4 complete: %s (%d rows, %.1fs)",
                     job.denom_table, cnt4, time.time() - t4)
 
-        # TODO: Stage 5 (surg) and file export
+        # Stage 5: final surrogate ratios
+        logger.info("  Stage 5: create_surg (final numer/denom ratio)")
+        t5 = time.time()
+        create_surg(con, job, schema)
+        cnt5 = get_table_row_count(con, job.surg_table, schema)
+        logger.info("  Stage 5 complete: %s (%d rows, %.1fs)",
+                    job.surg_table, cnt5, time.time() - t5)
 
         elapsed = round(time.time() - start, 1)
         logger.info("Surrogate %d done (%.1fs)", job.surrogate_code, elapsed)
@@ -963,6 +1015,7 @@ def compute_surrogate(con, job: SurrogateJob, schema: str = "public") -> dict:
             "wp_cty_cell_rows": cnt2,
             "numer_rows": cnt3,
             "denom_rows": cnt4,
+            "surg_rows": cnt5,
             "elapsed": elapsed,
         }
 
@@ -992,7 +1045,8 @@ def print_summary(results: list[dict]):
         print(f"  {r['code']} ({r['name']}): wp_cty={r['wp_cty_rows']} "
               f"wp_cty_cell={r['wp_cty_cell_rows']} "
               f"numer={r['numer_rows']} "
-              f"denom={r['denom_rows']} ({r['elapsed']}s)")
+              f"denom={r['denom_rows']} "
+              f"surg={r['surg_rows']} ({r['elapsed']}s)")
     if failed:
         print("\nFailed:")
         for r in failed:
@@ -1006,7 +1060,7 @@ def print_summary(results: list[dict]):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Compute spatial surrogates (Stage 1-4)."
+        description="Compute spatial surrogates (Stage 1-5)."
     )
     parser.add_argument(
         "--control-file", required=True,
