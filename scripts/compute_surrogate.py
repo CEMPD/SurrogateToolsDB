@@ -285,6 +285,14 @@ def get_backend_name(con) -> str:
     return getattr(con, "name", None) or "default"
 
 
+def table_exists(con, table_name: str, schema: str) -> bool:
+    """Return True when the target relation name already exists."""
+    try:
+        return table_name in set(con.list_tables(database=schema))
+    except Exception:
+        return False
+
+
 def load_table_expr(con, table_name: str, schema: str):
     """Load a database table as an ibis expression."""
     return con.table(table_name, database=schema)
@@ -317,6 +325,13 @@ def ensure_geospatial_column(table_expr, table_name: str, column_name: str):
 
 def materialize_table(con, table_name: str, expr, schema: str):
     """Create or replace a table from an ibis expression."""
+    if table_exists(con, table_name, schema):
+        logger.warning(
+            "Existing table will be overwritten: backend=%s schema=%s table=%s",
+            get_backend_name(con),
+            schema,
+            table_name,
+        )
     con.create_table(table_name, obj=expr, database=schema, overwrite=True)
 
 
