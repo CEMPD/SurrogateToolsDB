@@ -251,20 +251,26 @@ def resolve_srid(con, coord: dict) -> int:
     p_bet = coord["p_bet"]
     p_gam = coord["p_gam"]
     ycent = coord["ycent"]
+    srs_t = con.table("spatial_ref_sys", database="public")
+    proj4text = srs_t["proj4text"]
 
     # Search for existing match by key parameters
-    result = con.raw_sql(f"""
-        SELECT srid FROM spatial_ref_sys
-        WHERE proj4text LIKE '%+proj=lcc%'
-          AND proj4text LIKE '%+lat_1={_fmt(p_alp)}%'
-          AND proj4text LIKE '%+lat_2={_fmt(p_bet)}%'
-          AND proj4text LIKE '%+lon_0={_fmt(p_gam)}%'
-          AND proj4text LIKE '%+lat_0={_fmt(ycent)}%'
-          AND proj4text LIKE '%+a={SPHERE_A:.0f}%'
-    """).fetchone()
+    match_expr = (
+        srs_t.filter(
+            proj4text.contains("+proj=lcc")
+            & proj4text.contains(f"+lat_1={_fmt(p_alp)}")
+            & proj4text.contains(f"+lat_2={_fmt(p_bet)}")
+            & proj4text.contains(f"+lon_0={_fmt(p_gam)}")
+            & proj4text.contains(f"+lat_0={_fmt(ycent)}")
+            & proj4text.contains(f"+a={SPHERE_A:.0f}")
+        )
+        .select(srs_t["srid"].name("srid"))
+        .limit(1)
+    )
+    match_df = match_expr.execute()
 
-    if result:
-        srid = result[0]
+    if not match_df.empty:
+        srid = int(match_df.iloc[0]["srid"])
         logger.info("Found matching SRID: %d", srid)
         return srid
 
@@ -272,10 +278,8 @@ def resolve_srid(con, coord: dict) -> int:
     proj4 = build_lambert_proj4(p_alp, p_bet, p_gam, ycent)
     srtext = build_lambert_srtext(p_alp, p_bet, p_gam, ycent)
 
-    max_row = con.raw_sql(
-        "SELECT COALESCE(MAX(srid) + 1, 1) FROM spatial_ref_sys"
-    ).fetchone()
-    new_srid = max_row[0]
+    max_srid = srs_t["srid"].max().execute()
+    new_srid = 1 if max_srid is None else int(max_srid) + 1
 
     if new_srid >= 999000:
         raise ValueError(
@@ -296,14 +300,24 @@ def resolve_srid(con, coord: dict) -> int:
 # Table existence check
 # ---------------------------------------------------------------------------
 
+def get_backend_name(con) -> str:
+    """Return the ibis backend name."""
+    return getattr(con, "name", None) or "default"
+
+
+def quote_identifier(name: str) -> str:
+    """Return a SQL identifier wrapped in double quotes."""
+    return '"' + name.replace('"', '""') + '"'
+
+
+def qualify_table_name(schema: str, table_name: str) -> str:
+    """Return a table identifier with the schema."""
+    return f"{quote_identifier(schema)}.{quote_identifier(table_name)}"
+
+
 def table_exists(con, table_name: str, schema: str = "public") -> bool:
     """Return True if table exists in the given schema."""
-    result = con.raw_sql(f"""
-        SELECT COUNT(*) FROM information_schema.tables
-        WHERE table_schema = '{schema}'
-          AND table_name   = '{table_name}'
-    """).fetchone()
-    return result[0] > 0
+    return table_name in set(con.list_tables(database=schema))
 
 
 # ---------------------------------------------------------------------------
@@ -327,16 +341,22 @@ def create_grid(con, grid: dict) -> dict:
     name = grid["name"]
     schema = grid["schema"]
     srid = grid["srid"]
+    qualified_name = qualify_table_name(schema, name)
     start = time.time()
 
     # Check if table already exists
     if table_exists(con, name, schema):
-        logger.warning("%s: table already exists, dropping", name)
-        con.raw_sql(f"DROP TABLE {schema}.{name}")
+        logger.warning(
+            "Existing table will be overwritten: backend=%s schema=%s table=%s",
+            get_backend_name(con),
+            schema,
+            name,
+        )
+        con.raw_sql(f"DROP TABLE {qualified_name}")
 
     # Create table
     con.raw_sql(f"""
-        CREATE TABLE {schema}.{name} (
+        CREATE TABLE {qualified_name} (
             colnum  INT NOT NULL,
             rownum  INT NOT NULL,
             gridcell geometry(Polygon, {srid}),
@@ -346,12 +366,12 @@ def create_grid(con, grid: dict) -> dict:
 
     # Spatial index
     con.raw_sql(
-        f"CREATE INDEX ON {schema}.{name} USING GIST (gridcell)"
+        f"CREATE INDEX ON {qualified_name} USING GIST (gridcell)"
     )
 
     # Generate grid cells
     con.raw_sql(f"""
-        INSERT INTO {schema}.{name} (colnum, rownum, gridcell)
+        INSERT INTO {qualified_name} (colnum, rownum, gridcell)
         SELECT (gv).x AS colnum, (gv).y AS rownum, (gv).geom
         FROM (
             SELECT ST_PixelAsPolygons(
@@ -369,9 +389,7 @@ def create_grid(con, grid: dict) -> dict:
     """)
 
     # Row count
-    cnt = con.raw_sql(
-        f"SELECT COUNT(*) FROM {schema}.{name}"
-    ).fetchone()[0]
+    cnt = int(con.table(name, database=schema).count().execute())
 
     elapsed = round(time.time() - start, 1)
     logger.info("%s: created (%d rows, %.1fs)", name, cnt, elapsed)
