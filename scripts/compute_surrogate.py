@@ -10,7 +10,8 @@ Current scope (Phase 1):
   - polygon geometry with and without weight attributes
   - Stage 1 (wp_cty), Stage 2 (wp_cty_cell), Stage 3 (numer),
     Stage 4 (denom), and Stage 5 (surg)
-  - file export is not yet implemented
+  - file export (`NOFILL`, `SRGDESC`) for computed surrogates
+  - combined output, merge, gapfill, and QA are not yet implemented
 
 Usage:
     python scripts/compute_surrogate.py 
@@ -21,11 +22,14 @@ Usage:
 
 import argparse
 import csv
+import getpass
 import logging
+import platform
 import re
 import sys
 import time
 from dataclasses import dataclass
+from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +37,7 @@ import ibis
 import ibis.expr.datatypes as dt
 
 import db_utils
+import generate_grid
 import reproject
 
 logger = logging.getLogger(__name__)
@@ -58,6 +63,7 @@ class SurrogateJob:
     # Weight shapefile (the values being distributed)
     weight_table: str         # e.g. "acs2016_5yr_bg"
     weight_attribute: str     # e.g. "pop2016", or "" if area/length/count-only
+    weight_function: str      # legacy metadata field, currently informational
 
     # Optional SQL filter applied to the weight table
     filter_function: str      # e.g. "" or "moves2014>1 and moves2014<6"
@@ -114,6 +120,40 @@ class SurrogateJob:
     @property
     def surg_table(self) -> str:
         return f"surg_{self.surrogate_code}_{self.grid_name}"
+
+    @property
+    def nofill_file_name(self) -> str:
+        return f"{self.region}_{self.surrogate_code}_NOFILL.txt"
+
+    @property
+    def nofill_path(self) -> Path:
+        return Path(self.output_dir) / self.nofill_file_name
+
+
+@dataclass(frozen=True)
+class OutputConfig:
+    """Run-level settings needed for file export."""
+
+    grid_header: str
+    control_file_label: str
+    generation_file_label: str
+    specification_file_label: str
+    shapefile_catalog_label: str
+    surrogate_code_file_label: str
+    griddesc_label: str
+    srgdesc_path: Path | None
+    overwrite_output_files: bool
+    combined_output_path: Path | None
+
+
+@dataclass(frozen=True)
+class SurrogateOutput:
+    """One exported surrogate record for SRGDESC output."""
+
+    region: str
+    surrogate_code: int
+    surrogate_name: str
+    nofill_path: Path
 
 
 # ---------------------------------------------------------------------------
@@ -218,6 +258,7 @@ def build_jobs(
             data_attribute=spec.get("DATA ATTRIBUTE", "").lower(),
             weight_table=weight_table,
             weight_attribute=spec.get("WEIGHT ATTRIBUTE", "").strip(),
+            weight_function=spec.get("WEIGHT FUNCTION", "").strip(),
             filter_function=spec.get("FILTER FUNCTION", "").strip(),
             weight_geomtype=cat_entry["geomtype"],
             grid_name=grid_name,
@@ -1055,6 +1096,324 @@ def print_summary(results: list[dict]):
 
 
 # ---------------------------------------------------------------------------
+# Output files
+# ---------------------------------------------------------------------------
+
+def parse_yes_no(value: str, default: bool = False) -> bool:
+    """Parse a legacy YES/NO control value."""
+    if not value:
+        return default
+    return value.strip().upper() == "YES"
+
+
+def get_projection_header(coordtype: int) -> tuple[str, str]:
+    """Map an IOAPI coordinate type to legacy file header labels."""
+    mapping = {
+        1: ("LAT-LON", "degrees"),
+        2: ("LAMBERT", "meters"),
+        5: ("UTM", "meters"),
+    }
+    if coordtype not in mapping:
+        raise ValueError(f"unsupported output coordtype {coordtype}")
+    return mapping[coordtype]
+
+
+def build_grid_header(grid_name: str, griddesc_path: Path) -> str:
+    """Build the legacy #GRID header line for one output grid."""
+    coord_systems, grids = generate_grid.parse_griddesc(griddesc_path)
+    if grid_name not in grids:
+        raise ValueError(f"{griddesc_path}: grid {grid_name!r} not found")
+
+    grid_def = grids[grid_name]
+    coord_name = grid_def["coord_name"]
+    if coord_name not in coord_systems:
+        raise ValueError(
+            f"{griddesc_path}: coord system {coord_name!r} not found for "
+            f"grid {grid_name!r}"
+        )
+
+    coord = coord_systems[coord_name]
+    proj_name, units = get_projection_header(coord["coordtype"])
+    parts = [
+        "#GRID",
+        grid_name,
+        f"{grid_def['xorig']:.6f}",
+        f"{grid_def['yorig']:.6f}",
+        f"{grid_def['xcell']:.6f}",
+        f"{grid_def['ycell']:.6f}",
+        str(grid_def["ncols"]),
+        str(grid_def["nrows"]),
+        str(grid_def["nthik"]),
+        proj_name,
+        units,
+        f"{coord['p_alp']:.6f}",
+        f"{coord['p_bet']:.6f}",
+        f"{coord['p_gam']:.6f}",
+        f"{coord['xcent']:.6f}",
+        f"{coord['ycent']:.6f}",
+    ]
+    return "\t".join(parts)
+
+
+def build_output_config(
+    controls: dict[str, str],
+    control_path: Path,
+) -> OutputConfig:
+    """Create run-level output settings from control variables."""
+    grid_name = controls.get("OUTPUT_GRID_NAME", "").strip()
+    griddesc_value = controls.get("GRIDDESC", "").strip()
+    if not grid_name:
+        raise ValueError("OUTPUT_GRID_NAME is required for file export")
+    if not griddesc_value:
+        raise ValueError("GRIDDESC is required for file export")
+
+    griddesc_path = Path(griddesc_value)
+    srgdesc_value = controls.get("OUTPUT SRGDESC FILE", "").strip()
+    total_value = controls.get("OUTPUT SURROGATE FILE", "").strip()
+
+    return OutputConfig(
+        grid_header=build_grid_header(grid_name, griddesc_path),
+        control_file_label=str(control_path),
+        generation_file_label=controls.get("GENERATION CONTROL FILE", ""),
+        specification_file_label=controls.get("SURROGATE SPECIFICATION FILE", ""),
+        shapefile_catalog_label=controls.get("SHAPEFILE CATALOG", ""),
+        surrogate_code_file_label=controls.get("SURROGATE CODE FILE", ""),
+        griddesc_label=griddesc_value,
+        srgdesc_path=(
+            None if not srgdesc_value or srgdesc_value.upper() == "NONE"
+            else Path(srgdesc_value)
+        ),
+        overwrite_output_files=parse_yes_no(
+            controls.get("OVERWRITE OUTPUT FILES", "YES"),
+            default=True,
+        ),
+        combined_output_path=(
+            None if not total_value or total_value.upper() == "NONE"
+            else Path(total_value)
+        ),
+    )
+
+
+def build_nofill_rows_expr(con, job: SurrogateJob, schema: str):
+    """Build the ordered NOFILL output rows from the Stage 5 table."""
+    surg_t = load_table_expr(con, job.surg_table, schema)
+    da = job.data_attribute
+
+    ensure_columns(
+        surg_t,
+        job.surg_table,
+        ["surg_code", da, "colnum", "rownum", "surg", "numer", "denom"],
+    )
+
+    return (
+        surg_t.select(
+            surg_t["surg_code"].name("surg_code"),
+            surg_t[da].name(da),
+            surg_t["colnum"].name("colnum"),
+            surg_t["rownum"].name("rownum"),
+            surg_t["surg"].round(10).name("surg"),
+            ibis.literal("!").name("sep"),
+            surg_t["numer"].name("numer"),
+            surg_t["denom"].name("denom"),
+        )
+        .order_by([da, "colnum", "rownum"])
+    )
+
+
+def iter_expr_rows(con, expr, chunk_size: int = 10000):
+    """Yield rows from an ibis expression, preferring streaming SQL access."""
+    try:
+        cursor = con.raw_sql(con.compile(expr))
+    except Exception:
+        frame = expr.execute()
+        for row in frame.itertuples(index=False, name=None):
+            yield row
+        return
+
+    try:
+        fetchmany = getattr(cursor, "fetchmany", None)
+        if not callable(fetchmany):
+            for row in cursor.fetchall():
+                yield row
+            return
+
+        while True:
+            rows = fetchmany(chunk_size)
+            if not rows:
+                break
+            for row in rows:
+                yield row
+    finally:
+        close = getattr(cursor, "close", None)
+        if callable(close):
+            close()
+
+
+def to_decimal(value: Any) -> Decimal:
+    """Convert a numeric value into Decimal without scientific notation."""
+    if isinstance(value, Decimal):
+        return value
+    return Decimal(str(value))
+
+
+def format_fixed_number(value: Any, scale: int) -> str:
+    """Render a numeric value for the surrogate result with fixed-point rounding and no exponent."""
+    quant = Decimal(1).scaleb(-scale)
+    text = format(
+        to_decimal(value).quantize(quant, rounding=ROUND_HALF_UP),
+        "f",
+    )
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    return text or "0"
+
+
+def format_plain_number(value: Any) -> str:
+    """Render a numeric value in plain decimal for denon and numerform without scientific notation."""
+    text = format(to_decimal(value), "f")
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    return text or "0"
+
+
+def format_nofill_row(row: tuple[Any, ...]) -> str:
+    """Format one NOFILL row with legacy-compatible numeric text output."""
+    surg_code, region_id, colnum, rownum, surg, sep, numer, denom = row
+    fields = [
+        str(surg_code),
+        str(region_id),
+        str(colnum),
+        str(rownum),
+        format_fixed_number(surg, 10),
+        str(sep),
+        format_plain_number(numer),
+        format_plain_number(denom),
+    ]
+    return "\t".join(fields)
+
+
+def build_nofill_header_lines(job: SurrogateJob, output_cfg: OutputConfig) -> list[str]:
+    """Build the legacy-style NOFILL header block."""
+    return [
+        output_cfg.grid_header,
+        f"#SRGDESC={job.surrogate_code},{job.surrogate_name}",
+        "#",
+        f"#SURROGATE REGION = {job.region}",
+        f"#SURROGATE CODE = {job.surrogate_code}",
+        f"#SURROGATE NAME = {job.surrogate_name}",
+        f"#DATA SHAPEFILE = {job.data_table}",
+        f"#DATA ATTRIBUTE = {job.data_attribute}",
+        f"#WEIGHT SHAPEFILE = {job.weight_table}",
+        f"#WEIGHT ATTRIBUTE = {job.weight_attribute}",
+        f"#WEIGHT FUNCTION = {job.weight_function}",
+        f"#FILTER FUNCTION = {job.filter_function}",
+        "#",
+        f"#CONTROL VARIABLE FILE = {output_cfg.control_file_label}",
+        f"#SURROGATE SPECIFICATION FILE = {output_cfg.specification_file_label}",
+        f"#SHAPEFILE CATALOG = {output_cfg.shapefile_catalog_label}",
+        f"#GENERATION CONTROL FILE = {output_cfg.generation_file_label}",
+        f"#SURROGATE CODE FILE = {output_cfg.surrogate_code_file_label}",
+        f"#GRIDDESC = {output_cfg.griddesc_label}",
+        "#",
+        f"#USER = {getpass.getuser()}",
+        f"#COMPUTER SYSTEM = {platform.system()}",
+        f"#DATE = {time.strftime('%a %b %d %H:%M:%S %Z %Y')}",
+    ]
+
+
+def prepare_output_path(path: Path, overwrite: bool):
+    """Create parent directories and enforce overwrite behavior."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists() and path.is_dir():
+        raise IsADirectoryError(f"{path} is a directory")
+    if path.exists() and not overwrite:
+        raise FileExistsError(
+            f"{path} already exists and OVERWRITE OUTPUT FILES=NO"
+        )
+
+
+def write_nofill(
+    con,
+    job: SurrogateJob,
+    output_cfg: OutputConfig,
+    schema: str = "public",
+) -> SurrogateOutput:
+    """Write one legacy-style NOFILL file from the Stage 5 table."""
+    path = job.nofill_path
+    prepare_output_path(path, output_cfg.overwrite_output_files)
+
+    expr = build_nofill_rows_expr(con, job, schema)
+    logger.info("  Output: write_nofill -> %s", path)
+
+    with path.open("w", encoding="utf-8", newline="\n") as f:
+        for line in build_nofill_header_lines(job, output_cfg):
+            f.write(line + "\n")
+        for row in iter_expr_rows(con, expr):
+            f.write(format_nofill_row(row) + "\n")
+
+    return SurrogateOutput(
+        region=job.region,
+        surrogate_code=job.surrogate_code,
+        surrogate_name=job.surrogate_name,
+        nofill_path=path,
+    )
+
+
+def read_existing_srgdesc_rows(path: Path) -> dict[str, tuple[str, str, str, str]]:
+    """Read existing SRGDESC rows, ignoring headers/comments."""
+    rows: dict[str, tuple[str, str, str, str]] = {}
+    if not path.exists():
+        return rows
+
+    with path.open(newline="", encoding="utf-8") as f:
+        reader = csv.reader(f)
+        for row in reader:
+            if not row:
+                continue
+            first = row[0].strip()
+            if not first or first.startswith("#"):
+                continue
+            if len(row) != 4:
+                logger.warning(
+                    "Skipping malformed SRGDESC line in %s: %s",
+                    path,
+                    row,
+                )
+                continue
+            key = f"{row[0]}_{row[1]}"
+            rows[key] = (row[0], row[1], row[2], row[3])
+    return rows
+
+
+def write_srgdesc(outputs: list[SurrogateOutput], output_cfg: OutputConfig):
+    """Write or refresh the run-level SRGDESC file."""
+    if output_cfg.srgdesc_path is None:
+        return
+    if not outputs:
+        return
+
+    path = output_cfg.srgdesc_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    rows = read_existing_srgdesc_rows(path)
+    for output in outputs:
+        key = f"{output.region}_{output.surrogate_code}"
+        rows[key] = (
+            output.region,
+            str(output.surrogate_code),
+            output.surrogate_name,
+            output.nofill_path.as_posix(),
+        )
+
+    logger.info("Writing SRGDESC file -> %s", path)
+    with path.open("w", encoding="utf-8", newline="\n") as f:
+        f.write(output_cfg.grid_header + "\n")
+        writer = csv.writer(f, lineterminator="\n")
+        for key in sorted(rows):
+            writer.writerow(rows[key])
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -1124,6 +1483,7 @@ def main():
                   f"{'.' + j.weight_attribute if j.has_weight_attr else ''}")
             print(f"    geom:   {j.weight_geomtype} → {j.geom_family}")
             print(f"    grid:   {j.grid_name}  SRID: {j.srid}")
+            print(f"    nofill: {j.nofill_path}")
             if j.has_filter:
                 print(f"    filter: {j.filter_function}")
             print()
@@ -1131,14 +1491,52 @@ def main():
 
     # ---- Connect and compute ----
 
+    output_cfg = build_output_config(controls, control_path)
     config = db_utils.load_config(args.config)
     con = db_utils.connect_db(config)
 
     try:
         results = []
+        written_outputs: list[SurrogateOutput] = []
         for job in jobs:
             result = compute_surrogate(con, job, args.schema)
+            if result["status"] == "success":
+                try:
+                    written = write_nofill(con, job, output_cfg, args.schema)
+                    written_outputs.append(written)
+                    result["nofill_path"] = written.nofill_path.as_posix()
+                except Exception as exc:
+                    logger.error(
+                        "Surrogate %d output export failed: %s",
+                        job.surrogate_code,
+                        exc,
+                    )
+                    result = {
+                        "code": job.surrogate_code,
+                        "name": job.surrogate_name,
+                        "status": "error",
+                        "reason": f"output export failed: {exc}",
+                    }
             results.append(result)
+
+        if output_cfg.combined_output_path is not None:
+            logger.info(
+                "OUTPUT SURROGATE FILE is configured (%s) but not yet "
+                "implemented in the Python rebuild",
+                output_cfg.combined_output_path,
+            )
+
+        try:
+            write_srgdesc(written_outputs, output_cfg)
+        except Exception as exc:
+            logger.error("SRGDESC export failed: %s", exc)
+            results.append({
+                "code": "SRGDESC",
+                "name": "SRGDESC export",
+                "status": "error",
+                "reason": str(exc),
+            })
+
         print_summary(results)
     finally:
         con.disconnect()
