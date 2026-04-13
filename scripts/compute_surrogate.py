@@ -39,6 +39,7 @@ import ibis.expr.datatypes as dt
 import db_utils
 import generate_grid
 import reproject
+import utils as surrogate_utils
 
 logger = logging.getLogger(__name__)
 
@@ -144,6 +145,7 @@ class OutputConfig:
     srgdesc_path: Path | None
     overwrite_output_files: bool
     combined_output_path: Path | None
+    cleanup_intermediate_tables: bool
 
 
 @dataclass(frozen=True)
@@ -1206,6 +1208,10 @@ def build_output_config(
             None if not total_value or total_value.upper() == "NONE"
             else Path(total_value)
         ),
+        cleanup_intermediate_tables=parse_yes_no(
+            controls.get("CLEANUP INTERMEDIATE TABLES", "NO"),
+            default=False,
+        ),
     )
 
 
@@ -1428,6 +1434,31 @@ def write_srgdesc(outputs: list[SurrogateOutput], output_cfg: OutputConfig):
             writer.writerow(rows[key])
 
 
+def cleanup_job_intermediate_tables(
+    con,
+    job: SurrogateJob,
+    output_cfg: OutputConfig,
+    schema: str = "public",
+) -> dict[str, list[str]] | None:
+    """Drop the current job's intermediate tables when cleanup is enabled."""
+    if not output_cfg.cleanup_intermediate_tables:
+        return None
+
+    logger.info(
+        "  Cleanup: drop intermediate tables for code=%s grid=%s srid=%s",
+        job.surrogate_code,
+        job.grid_name,
+        job.srid,
+    )
+    return surrogate_utils.cleanup_intermediate_tables(
+        con,
+        surrogate_code=job.surrogate_code,
+        srid=job.srid,
+        grid_name=job.grid_name,
+        schema=schema,
+    )
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -1518,11 +1549,17 @@ def main():
             if result["status"] == "success":
                 try:
                     written = write_nofill(con, job, output_cfg, args.schema)
+                    cleanup_job_intermediate_tables(
+                        con,
+                        job,
+                        output_cfg,
+                        args.schema,
+                    )
                     written_outputs.append(written)
                     result["nofill_path"] = written.nofill_path.as_posix()
                 except Exception as exc:
                     logger.error(
-                        "Surrogate %d output export failed: %s",
+                        "Surrogate %d output export or cleanup failed: %s",
                         job.surrogate_code,
                         exc,
                     )
@@ -1530,7 +1567,7 @@ def main():
                         "code": job.surrogate_code,
                         "name": job.surrogate_name,
                         "status": "error",
-                        "reason": f"output export failed: {exc}",
+                        "reason": f"output export or cleanup failed: {exc}",
                     }
             results.append(result)
 

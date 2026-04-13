@@ -5,6 +5,8 @@ Usage:
     python scripts/utils.py shapefiles [--config PATH] [--schema SCHEMA]
     python scripts/utils.py shapefiles-ibis [--config PATH] [--schema SCHEMA]
     python scripts/utils.py grids [--config PATH] [--schema SCHEMA]
+    python scripts/utils.py cleanup-intermediate --code CODE --srid SRID
+        --grid GRID [--config PATH] [--schema SCHEMA]
 """
 
 import argparse
@@ -38,6 +40,45 @@ def classify_shapefile_columns(col_names: list[str]) -> tuple[list[str], list[st
                if c.startswith("area_") or c.startswith("length_")
                or "_dens_" in c]
     return reprojections, density
+
+
+def get_intermediate_table_names(
+    surrogate_code: int,
+    srid: int,
+    grid_name: str,
+) -> list[str]:
+    """Return the intermediate tables for one surrogate job in cleanup order."""
+    return [
+        f"wp_cty_{surrogate_code}_{srid}",
+        f"wp_cty_cell_{surrogate_code}_{grid_name}",
+        f"numer_{surrogate_code}_{grid_name}",
+        f"denom_{surrogate_code}_{grid_name}",
+        f"surg_{surrogate_code}_{grid_name}",
+    ]
+
+
+def cleanup_intermediate_tables(
+    con,
+    surrogate_code: int,
+    srid: int,
+    grid_name: str,
+    schema: str = "public",
+) -> dict[str, list[str]]:
+    """Drop the known intermediate tables for one surrogate job."""
+    existing_tables = set(con.list_tables(database=schema))
+    dropped: list[str] = []
+    missing: list[str] = []
+
+    for table_name in get_intermediate_table_names(surrogate_code, srid, grid_name):
+        if table_name not in existing_tables:
+            missing.append(table_name)
+            continue
+
+        logger.info("Dropping intermediate table %s.%s", schema, table_name)
+        con.drop_table(table_name, database=schema, force=True)
+        dropped.append(table_name)
+
+    return {"dropped": dropped, "missing": missing}
 
 
 def get_ibis_geom_info(schema_obj, geom_col: str = "wkb_geometry") -> tuple[str, str]:
@@ -277,6 +318,16 @@ def main():
     sp_grids.add_argument("--config", default=None, help="Path to database_config.csv")
     sp_grids.add_argument("--schema", default="public", help="Schema (default: public)")
 
+    sp_cleanup = sub.add_parser(
+        "cleanup-intermediate",
+        help="Drop one surrogate job's intermediate stage tables",
+    )
+    sp_cleanup.add_argument("--config", default=None, help="Path to database_config.csv")
+    sp_cleanup.add_argument("--schema", default="public", help="Schema (default: public)")
+    sp_cleanup.add_argument("--code", required=True, type=int, help="Surrogate code")
+    sp_cleanup.add_argument("--srid", required=True, type=int, help="Stage-1 SRID")
+    sp_cleanup.add_argument("--grid", required=True, help="Grid name")
+
     args = parser.parse_args()
     if not args.command:
         parser.print_help()
@@ -297,6 +348,21 @@ def main():
             list_shapefiles_ibis(con, args.schema)
         elif args.command == "grids":
             list_grids_ibis(con, args.schema)
+        elif args.command == "cleanup-intermediate":
+            result = cleanup_intermediate_tables(
+                con,
+                surrogate_code=args.code,
+                srid=args.srid,
+                grid_name=args.grid,
+                schema=args.schema,
+            )
+            print(
+                f"Dropped {len(result['dropped'])} intermediate table(s)"
+            )
+            if result["missing"]:
+                print(
+                    f"Missing {len(result['missing'])} intermediate table(s)"
+                )
     finally:
         con.disconnect()
 
