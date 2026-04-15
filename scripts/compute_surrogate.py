@@ -44,6 +44,11 @@ import utils as surrogate_utils
 logger = logging.getLogger(__name__)
 
 
+def is_legacy_none(value: str) -> bool:
+    """Return True when a legacy CSV field means 'not specified'."""
+    return not value or value.strip().upper() == "NONE"
+
+
 # ---------------------------------------------------------------------------
 # SurrogateJob — all parameters for one surrogate computation
 # ---------------------------------------------------------------------------
@@ -63,7 +68,7 @@ class SurrogateJob:
 
     # Weight shapefile (the values being distributed)
     weight_table: str         # e.g. "acs2016_5yr_bg"
-    weight_attribute: str     # e.g. "pop2016", or "" if area/length/count-only
+    weight_attribute: str     # e.g. "pop2016", "" or "NONE" for legacy no-WA
     weight_function: str      # legacy metadata field, currently informational
 
     # Optional SQL filter applied to the weight table
@@ -94,7 +99,16 @@ class SurrogateJob:
 
     @property
     def has_weight_attr(self) -> bool:
-        return bool(self.weight_attribute)
+        return not is_legacy_none(self.weight_attribute)
+
+    @property
+    def weight_attribute_column(self) -> str:
+        """Return a validated weight-attribute column name for WA-only paths."""
+        if not self.has_weight_attr:
+            raise ValueError(
+                "weight attribute is NONE/blank for this surrogate"
+            )
+        return self.weight_attribute
 
     @property
     def has_filter(self) -> bool:
@@ -572,7 +586,7 @@ def get_effective_measure_column(job: SurrogateJob) -> str:
     """
     if job.geom_family == "polygon":
         if job.has_weight_attr:
-            return job.weight_attribute
+            return job.weight_attribute_column
         return f"area_{job.srid}"
 
     raise NotImplementedError(
@@ -647,7 +661,7 @@ def build_polygon_wa_wp_cty_expr(con, job: SurrogateJob, schema: str):
         job.filter_function,
         job.weight_table,
     ).alias("weight")
-    wa = job.weight_attribute
+    wa = job.weight_attribute_column
     da = job.data_attribute
     srid = job.srid
     geom = f"geom_{srid}"
@@ -694,7 +708,7 @@ def build_polygon_wa_wp_cty_cell_expr(con, job: SurrogateJob, schema: str):
     """Build the Stage 2 result as an ibis expression."""
     wp_t = load_table_expr(con, job.wp_cty_table, schema).alias("wp")
     grid_t = load_table_expr(con, job.grid_name, schema).alias("g")
-    wa = job.weight_attribute
+    wa = job.weight_attribute_column
     da = job.data_attribute
     srid = job.srid
     geom = f"geom_{srid}"
@@ -825,7 +839,7 @@ def create_wp_cty(con, job: SurrogateJob, schema: str = "public"):
 
 def _create_polygon_wa_wp_cty(con, job: SurrogateJob, schema: str):
     """Polygon + weight-attribute path for Stage 1."""
-    wa = job.weight_attribute
+    wa = job.weight_attribute_column
     srid = job.srid
     geom = f"geom_{srid}"
 
@@ -871,7 +885,7 @@ def create_wp_cty_cell(con, job: SurrogateJob, schema: str = "public"):
 
 def _create_polygon_wa_wp_cty_cell(con, job: SurrogateJob, schema: str):
     """Polygon + weight-attribute path for Stage 2."""
-    wa = job.weight_attribute
+    wa = job.weight_attribute_column
     srid = job.srid
     geom = f"geom_{srid}"
 
