@@ -927,10 +927,9 @@ def create_wp_cty(con, job: SurrogateJob, schema: str = "public"):
         _create_point_no_wa_wp_cty(con, job, schema)
         return
 
-    if job.geom_family != "polygon":
-        raise NotImplementedError(
-            f"geom_family='{job.geom_family}' not yet supported in create_wp_cty"
-        )
+    raise NotImplementedError(
+        f"geom_family='{job.geom_family}' not yet supported in create_wp_cty"
+    )
 
 
 def _create_polygon_wa_wp_cty(con, job: SurrogateJob, schema: str):
@@ -1000,11 +999,10 @@ def create_wp_cty_cell(con, job: SurrogateJob, schema: str = "public"):
         _create_point_no_wa_wp_cty_cell(con, job, schema)
         return
 
-    if job.geom_family != "polygon":
-        raise NotImplementedError(
-            f"geom_family='{job.geom_family}' not yet supported in "
-            "create_wp_cty_cell"
-        )
+    raise NotImplementedError(
+        f"geom_family='{job.geom_family}' not yet supported in "
+        "create_wp_cty_cell"
+    )
 
 
 def _create_polygon_wa_wp_cty_cell(con, job: SurrogateJob, schema: str):
