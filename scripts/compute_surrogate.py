@@ -598,14 +598,18 @@ def get_effective_measure_column(job: SurrogateJob) -> str:
 
 def get_numer_measure_column(job: SurrogateJob) -> str:
     """Return the Stage 3 column for the current job."""
-    if job.geom_family == "point" and not job.has_weight_attr:
+    if job.geom_family == "point":
+        if job.has_weight_attr:
+            return job.weight_attribute_column
         return "count_wp_cty_cell"
     return get_effective_measure_column(job)
 
 
 def get_denom_measure_column(job: SurrogateJob) -> str:
     """Return the Stage 4 column for the current job."""
-    if job.geom_family == "point" and not job.has_weight_attr:
+    if job.geom_family == "point":
+        if job.has_weight_attr:
+            return job.weight_attribute_column
         return "count_wp_cty"
     return get_effective_measure_column(job)
 
@@ -902,11 +906,55 @@ def build_point_no_wa_wp_cty_cell_expr(con, job: SurrogateJob, schema: str):
     )
 
 
+def build_point_wa_wp_cty_expr(con, job: SurrogateJob, schema: str):
+    """Build the Stage 1 point+weight-attribute result as an ibis expression."""
+    data_t = load_table_expr(con, job.data_table, schema).alias("data")
+    weight_t = load_table_expr(con, job.weight_table, schema).alias("weight")
+    da = job.data_attribute
+    wa = job.weight_attribute_column
+    geom = f"geom_{job.srid}"
+
+    ensure_columns(data_t, job.data_table, [da, geom])
+    ensure_columns(weight_t, job.weight_table, [wa, geom])
+    ensure_geospatial_column(data_t, job.data_table, geom)
+    ensure_geospatial_column(weight_t, job.weight_table, geom)
+
+    joined = weight_t.join(data_t, data_t[geom].contains(weight_t[geom]))
+    return joined.select(
+        data_t[da].name(da),
+        weight_t[wa].name(wa),
+        weight_t[geom].name(geom),
+    )
+
+
+def build_point_wa_wp_cty_cell_expr(con, job: SurrogateJob, schema: str):
+    """Build the Stage 2 point+weight-attribute result as an ibis expression."""
+    wp_t = load_table_expr(con, job.wp_cty_table, schema).alias("wp")
+    grid_t = load_table_expr(con, job.grid_name, schema).alias("g")
+    da = job.data_attribute
+    wa = job.weight_attribute_column
+    geom = f"geom_{job.srid}"
+
+    ensure_columns(wp_t, job.wp_cty_table, [da, wa, geom])
+    ensure_columns(grid_t, job.grid_name, ["colnum", "rownum", "gridcell"])
+    ensure_geospatial_column(wp_t, job.wp_cty_table, geom)
+    ensure_geospatial_column(grid_t, job.grid_name, "gridcell")
+
+    joined = wp_t.join(grid_t, grid_t.gridcell.contains(wp_t[geom]))
+    return joined.select(
+        wp_t[da].name(da),
+        grid_t.colnum.name("colnum"),
+        grid_t.rownum.name("rownum"),
+        wp_t[wa].name(wa),
+        wp_t[geom].name(geom),
+    )
+
+
 def create_wp_cty(con, job: SurrogateJob, schema: str = "public"):
     """Stage 1: intersect weight geometries with data boundaries.
 
     Current scope supports polygon geometry with or without a weight
-    attribute, plus point geometry without a weight attribute.
+    attribute, plus point geometry with or without a weight attribute.
     """
     if job.geom_family == "polygon":
         if job.has_weight_attr:
@@ -918,10 +966,13 @@ def create_wp_cty(con, job: SurrogateJob, schema: str = "public"):
 
     if job.geom_family == "point":
         if job.has_weight_attr:
-            raise NotImplementedError(
-                "point geometry with weight attribute is not yet supported "
-                "in create_wp_cty"
-            )
+            if job.has_filter:
+                raise NotImplementedError(
+                    "point geometry with filter and weight attribute is not "
+                    "yet supported in create_wp_cty"
+                )
+            _create_point_wa_wp_cty(con, job, schema)
+            return
 
         _create_point_no_wa_wp_cty(con, job, schema)
         return
@@ -961,6 +1012,15 @@ def _create_point_no_wa_wp_cty(con, job: SurrogateJob, schema: str):
     postprocess_point_output(con, job.wp_cty_table, geom, schema)
 
 
+def _create_point_wa_wp_cty(con, job: SurrogateJob, schema: str):
+    """Point + weight-attribute path for Stage 1."""
+    geom = f"geom_{job.srid}"
+
+    expr = build_point_wa_wp_cty_expr(con, job, schema)
+    materialize_table(con, job.wp_cty_table, expr, schema)
+    postprocess_point_output(con, job.wp_cty_table, geom, schema)
+
+
 # ---------------------------------------------------------------------------
 # Stage 2: wp_cty_cell — intersect wp_cty with grid cells
 # ---------------------------------------------------------------------------
@@ -973,7 +1033,7 @@ def create_wp_cty_cell(con, job: SurrogateJob, schema: str = "public"):
     """Stage 2: intersect wp_cty with grid cells.
 
     Current scope supports polygon geometry with or without a weight
-    attribute, plus point geometry without a weight attribute.
+    attribute, plus point geometry with or without a weight attribute.
     """
     if job.geom_family == "polygon":
         if job.has_weight_attr:
@@ -985,10 +1045,13 @@ def create_wp_cty_cell(con, job: SurrogateJob, schema: str = "public"):
 
     if job.geom_family == "point":
         if job.has_weight_attr:
-            raise NotImplementedError(
-                "point geometry with weight attribute is not yet supported "
-                "in create_wp_cty_cell"
-            )
+            if job.has_filter:
+                raise NotImplementedError(
+                    "point geometry with filter and weight attribute is not "
+                    "yet supported in create_wp_cty_cell"
+                )
+            _create_point_wa_wp_cty_cell(con, job, schema)
+            return
 
         _create_point_no_wa_wp_cty_cell(con, job, schema)
         return
@@ -1029,6 +1092,15 @@ def _create_point_no_wa_wp_cty_cell(con, job: SurrogateJob, schema: str):
     geom = f"geom_{job.srid}"
 
     expr = build_point_no_wa_wp_cty_cell_expr(con, job, schema)
+    materialize_table(con, job.wp_cty_cell_table, expr, schema)
+    postprocess_point_output(con, job.wp_cty_cell_table, geom, schema)
+
+
+def _create_point_wa_wp_cty_cell(con, job: SurrogateJob, schema: str):
+    """Point + weight-attribute path for Stage 2."""
+    geom = f"geom_{job.srid}"
+
+    expr = build_point_wa_wp_cty_cell_expr(con, job, schema)
     materialize_table(con, job.wp_cty_cell_table, expr, schema)
     postprocess_point_output(con, job.wp_cty_cell_table, geom, schema)
 
