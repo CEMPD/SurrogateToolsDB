@@ -909,7 +909,11 @@ def build_point_no_wa_wp_cty_cell_expr(con, job: SurrogateJob, schema: str):
 def build_point_wa_wp_cty_expr(con, job: SurrogateJob, schema: str):
     """Build the Stage 1 point+weight-attribute result as an ibis expression."""
     data_t = load_table_expr(con, job.data_table, schema).alias("data")
-    weight_t = load_table_expr(con, job.weight_table, schema).alias("weight")
+    weight_t = apply_filter_function(
+        load_table_expr(con, job.weight_table, schema),
+        job.filter_function,
+        job.weight_table,
+    ).alias("weight")
     da = job.data_attribute
     wa = job.weight_attribute_column
     geom = f"geom_{job.srid}"
@@ -966,11 +970,6 @@ def create_wp_cty(con, job: SurrogateJob, schema: str = "public"):
 
     if job.geom_family == "point":
         if job.has_weight_attr:
-            if job.has_filter:
-                raise NotImplementedError(
-                    "point geometry with filter and weight attribute is not "
-                    "yet supported in create_wp_cty"
-                )
             _create_point_wa_wp_cty(con, job, schema)
             return
 
@@ -1045,11 +1044,6 @@ def create_wp_cty_cell(con, job: SurrogateJob, schema: str = "public"):
 
     if job.geom_family == "point":
         if job.has_weight_attr:
-            if job.has_filter:
-                raise NotImplementedError(
-                    "point geometry with filter and weight attribute is not "
-                    "yet supported in create_wp_cty_cell"
-                )
             _create_point_wa_wp_cty_cell(con, job, schema)
             return
 
