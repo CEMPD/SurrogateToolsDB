@@ -9,6 +9,7 @@ surrogate ratio tables.
 Current scope (Phase 1):
   - polygon geometry with and without weight attributes
   - point geometry without weight attributes
+  - line geometry with filter and without weight attributes
   - Stage 1 (wp_cty), Stage 2 (wp_cty_cell), Stage 3 (numer),
     Stage 4 (denom), and Stage 5 (surg)
   - file export (`NOFILL`, `SRGDESC`) for computed surrogates
@@ -602,6 +603,8 @@ def get_numer_measure_column(job: SurrogateJob) -> str:
         if job.has_weight_attr:
             return job.weight_attribute_column
         return "count_wp_cty_cell"
+    if job.geom_family == "line" and not job.has_weight_attr and job.has_filter:
+        return "length_wp_cty_cell"
     return get_effective_measure_column(job)
 
 
@@ -611,6 +614,8 @@ def get_denom_measure_column(job: SurrogateJob) -> str:
         if job.has_weight_attr:
             return job.weight_attribute_column
         return "count_wp_cty"
+    if job.geom_family == "line" and not job.has_weight_attr and job.has_filter:
+        return "length_wp_cty"
     return get_effective_measure_column(job)
 
 
@@ -689,6 +694,56 @@ def postprocess_point_output(
         return
 
     qualified = f"{schema}.{table_name}"
+    con.raw_sql(f"CREATE INDEX ON {qualified} USING GIST ({geom_col})")
+
+
+def postprocess_line_output(
+    con,
+    table_name: str,
+    geom_col: str,
+    length_col: str,
+    srid: int,
+    schema: str = "public",
+):
+    """Normalize line geometry, refresh length, and index for PostGIS."""
+    backend = get_backend_name(con)
+    if backend != "postgres":
+        logger.info(
+            "%s: backend '%s' - skipping PostGIS-only line repair and index",
+            table_name,
+            backend,
+        )
+        return
+
+    qualified = f"{schema}.{table_name}"
+    con.raw_sql(f"""
+        UPDATE {qualified}
+        SET {geom_col} = ST_Multi(
+            ST_CollectionExtract(ST_SetSRID({geom_col}, {srid}), 2)
+        )
+        WHERE {geom_col} IS NOT NULL
+    """)
+    con.raw_sql(f"""
+        UPDATE {qualified}
+        SET {geom_col} = ST_MakeValid({geom_col})
+        WHERE {geom_col} IS NOT NULL
+          AND NOT ST_IsValid({geom_col})
+    """)
+    con.raw_sql(f"""
+        ALTER TABLE {qualified}
+        ALTER COLUMN {geom_col}
+        TYPE geometry(MultiLineString, {srid})
+        USING CASE
+            WHEN {geom_col} IS NULL THEN NULL
+            ELSE ST_Multi(
+                ST_CollectionExtract(
+                    ST_SetSRID({geom_col}, {srid}),
+                    2
+                )
+            )
+        END
+    """)
+    con.raw_sql(f"UPDATE {qualified} SET {length_col} = ST_Length({geom_col})")
     con.raw_sql(f"CREATE INDEX ON {qualified} USING GIST ({geom_col})")
 
 
@@ -954,6 +1009,57 @@ def build_point_wa_wp_cty_cell_expr(con, job: SurrogateJob, schema: str):
     )
 
 
+def build_line_no_wa_wp_cty_expr(con, job: SurrogateJob, schema: str):
+    """Build the Stage 1 filtered line-source result as an ibis expression."""
+    weight_t = apply_filter_function(
+        load_table_expr(con, job.weight_table, schema),
+        job.filter_function,
+        job.weight_table,
+    ).alias("weight")
+    da = job.data_attribute
+    geom = f"geom_{job.srid}"
+
+    ensure_columns(weight_t, job.weight_table, [da, geom])
+    ensure_geospatial_column(weight_t, job.weight_table, geom)
+
+    return weight_t.select(
+        weight_t[da].name(da),
+        weight_t[geom].length().name("length_wp_cty"),
+        weight_t[geom].name(geom),
+    )
+
+
+def build_line_no_wa_wp_cty_cell_expr(con, job: SurrogateJob, schema: str):
+    """Build the Stage 2 line-length result as an ibis expression."""
+    wp_t = load_table_expr(con, job.wp_cty_table, schema).alias("wp")
+    grid_t = load_table_expr(con, job.grid_name, schema).alias("g")
+    da = job.data_attribute
+    geom = f"geom_{job.srid}"
+
+    ensure_columns(wp_t, job.wp_cty_table, [da, geom])
+    ensure_columns(grid_t, job.grid_name, ["colnum", "rownum", "gridcell"])
+    ensure_geospatial_column(wp_t, job.wp_cty_table, geom)
+    ensure_geospatial_column(grid_t, job.grid_name, "gridcell")
+
+    overlap = (
+        wp_t[geom].intersects(grid_t.gridcell)
+        & ~wp_t[geom].touches(grid_t.gridcell)
+    )
+    joined = wp_t.join(grid_t, overlap)
+    clipped_geom = ibis.ifelse(
+        wp_t[geom].covered_by(grid_t.gridcell),
+        wp_t[geom],
+        wp_t[geom].intersection(grid_t.gridcell),
+    )
+    return joined.select(
+        wp_t[da].name(da),
+        grid_t.colnum.name("colnum"),
+        grid_t.rownum.name("rownum"),
+        clipped_geom.length().name("length_wp_cty_cell"),
+        clipped_geom.name(geom),
+    )
+
+
 def create_wp_cty(con, job: SurrogateJob, schema: str = "public"):
     """Stage 1: intersect weight geometries with data boundaries.
 
@@ -974,6 +1080,21 @@ def create_wp_cty(con, job: SurrogateJob, schema: str = "public"):
             return
 
         _create_point_no_wa_wp_cty(con, job, schema)
+        return
+
+    if job.geom_family == "line":
+        if job.has_weight_attr:
+            raise NotImplementedError(
+                "line geometry with weight attribute is not yet supported "
+                "in create_wp_cty"
+            )
+        if not job.has_filter:
+            raise NotImplementedError(
+                "line geometry without filter is not yet supported in "
+                "create_wp_cty"
+            )
+
+        _create_line_no_wa_wp_cty(con, job, schema)
         return
 
     raise NotImplementedError(
@@ -1020,6 +1141,18 @@ def _create_point_wa_wp_cty(con, job: SurrogateJob, schema: str):
     postprocess_point_output(con, job.wp_cty_table, geom, schema)
 
 
+def _create_line_no_wa_wp_cty(con, job: SurrogateJob, schema: str):
+    """Line + filter + no-weight-attribute path for Stage 1."""
+    srid = job.srid
+    geom = f"geom_{srid}"
+
+    expr = build_line_no_wa_wp_cty_expr(con, job, schema)
+    materialize_table(con, job.wp_cty_table, expr, schema)
+    postprocess_line_output(
+        con, job.wp_cty_table, geom, "length_wp_cty", srid, schema
+    )
+
+
 # ---------------------------------------------------------------------------
 # Stage 2: wp_cty_cell — intersect wp_cty with grid cells
 # ---------------------------------------------------------------------------
@@ -1048,6 +1181,21 @@ def create_wp_cty_cell(con, job: SurrogateJob, schema: str = "public"):
             return
 
         _create_point_no_wa_wp_cty_cell(con, job, schema)
+        return
+
+    if job.geom_family == "line":
+        if job.has_weight_attr:
+            raise NotImplementedError(
+                "line geometry with weight attribute is not yet supported "
+                "in create_wp_cty_cell"
+            )
+        if not job.has_filter:
+            raise NotImplementedError(
+                "line geometry without filter is not yet supported in "
+                "create_wp_cty_cell"
+            )
+
+        _create_line_no_wa_wp_cty_cell(con, job, schema)
         return
 
     raise NotImplementedError(
@@ -1097,6 +1245,23 @@ def _create_point_wa_wp_cty_cell(con, job: SurrogateJob, schema: str):
     expr = build_point_wa_wp_cty_cell_expr(con, job, schema)
     materialize_table(con, job.wp_cty_cell_table, expr, schema)
     postprocess_point_output(con, job.wp_cty_cell_table, geom, schema)
+
+
+def _create_line_no_wa_wp_cty_cell(con, job: SurrogateJob, schema: str):
+    """Line + filter + no-weight-attribute path for Stage 2."""
+    srid = job.srid
+    geom = f"geom_{srid}"
+
+    expr = build_line_no_wa_wp_cty_cell_expr(con, job, schema)
+    materialize_table(con, job.wp_cty_cell_table, expr, schema)
+    postprocess_line_output(
+        con,
+        job.wp_cty_cell_table,
+        geom,
+        "length_wp_cty_cell",
+        srid,
+        schema,
+    )
 
 
 # ---------------------------------------------------------------------------
