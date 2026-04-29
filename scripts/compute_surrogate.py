@@ -10,6 +10,7 @@ Current scope (Phase 1):
   - polygon geometry with and without weight attributes
   - point geometry with and without weight attributes
   - line geometry with filter, with and without weight attributes
+  - line geometry without filter/weight attributes when data-boundary overlay is needed
   - Stage 1 (wp_cty), Stage 2 (wp_cty_cell), Stage 3 (numer),
     Stage 4 (denom), and Stage 5 (surg)
   - file export (`NOFILL`, `SRGDESC`) for computed surrogates
@@ -603,10 +604,11 @@ def get_numer_measure_column(job: SurrogateJob) -> str:
         if job.has_weight_attr:
             return job.weight_attribute_column
         return "count_wp_cty_cell"
-    if job.geom_family == "line" and job.has_filter:
-        if job.has_weight_attr:
+    if job.geom_family == "line":
+        if job.has_filter and job.has_weight_attr:
             return "weighted_length_wp_cty_cell"
-        return "length_wp_cty_cell"
+        if not job.has_weight_attr:
+            return "length_wp_cty_cell"
     return get_effective_measure_column(job)
 
 
@@ -616,10 +618,11 @@ def get_denom_measure_column(job: SurrogateJob) -> str:
         if job.has_weight_attr:
             return job.weight_attribute_column
         return "count_wp_cty"
-    if job.geom_family == "line" and job.has_filter:
-        if job.has_weight_attr:
+    if job.geom_family == "line":
+        if job.has_filter and job.has_weight_attr:
             return "weighted_length_wp_cty"
-        return "length_wp_cty"
+        if not job.has_weight_attr:
+            return "length_wp_cty"
     return get_effective_measure_column(job)
 
 
@@ -1105,6 +1108,35 @@ def build_line_no_wa_wp_cty_expr(con, job: SurrogateJob, schema: str):
     )
 
 
+def build_line_no_wa_nofips_wp_cty_expr(con, job: SurrogateJob, schema: str):
+    """Build Stage 1 for line sources that need data-boundary assignment."""
+    data_t = load_table_expr(con, job.data_table, schema).alias("data")
+    weight_t = load_table_expr(con, job.weight_table, schema).alias("weight")
+    da = job.data_attribute
+    geom = f"geom_{job.srid}"
+
+    ensure_columns(data_t, job.data_table, [da, geom])
+    ensure_columns(weight_t, job.weight_table, [geom])
+    ensure_geospatial_column(data_t, job.data_table, geom)
+    ensure_geospatial_column(weight_t, job.weight_table, geom)
+
+    overlap = (
+        weight_t[geom].intersects(data_t[geom])
+        & ~weight_t[geom].touches(data_t[geom])
+    )
+    joined = data_t.join(weight_t, overlap)
+    clipped_geom = ibis.ifelse(
+        weight_t[geom].covered_by(data_t[geom]),
+        weight_t[geom],
+        weight_t[geom].intersection(data_t[geom]),
+    )
+    return joined.select(
+        data_t[da].name(da),
+        clipped_geom.length().name("length_wp_cty"),
+        clipped_geom.name(geom),
+    )
+
+
 def build_line_no_wa_wp_cty_cell_expr(con, job: SurrogateJob, schema: str):
     """Build the Stage 2 line-length result as an ibis expression."""
     wp_t = load_table_expr(con, job.wp_cty_table, schema).alias("wp")
@@ -1159,16 +1191,19 @@ def create_wp_cty(con, job: SurrogateJob, schema: str = "public"):
         return
 
     if job.geom_family == "line":
-        if not job.has_filter:
-            raise NotImplementedError(
-                "line geometry without filter is not yet supported in "
-                "create_wp_cty"
-            )
-        if job.has_weight_attr:
+        if job.has_filter and job.has_weight_attr:
             _create_line_wa_wp_cty(con, job, schema)
             return
+        if job.has_filter:
+            _create_line_no_wa_wp_cty(con, job, schema)
+            return
+        if job.has_weight_attr:
+            raise NotImplementedError(
+                "line geometry without filter and with weight attribute is "
+                "not yet supported in create_wp_cty"
+            )
 
-        _create_line_no_wa_wp_cty(con, job, schema)
+        _create_line_no_wa_nofips_wp_cty(con, job, schema)
         return
 
     raise NotImplementedError(
@@ -1248,6 +1283,18 @@ def _create_line_no_wa_wp_cty(con, job: SurrogateJob, schema: str):
     )
 
 
+def _create_line_no_wa_nofips_wp_cty(con, job: SurrogateJob, schema: str):
+    """Line + no-filter + no-weight-attribute + no-FIPS Stage 1 path."""
+    srid = job.srid
+    geom = f"geom_{srid}"
+
+    expr = build_line_no_wa_nofips_wp_cty_expr(con, job, schema)
+    materialize_table(con, job.wp_cty_table, expr, schema)
+    postprocess_line_output(
+        con, job.wp_cty_table, geom, "length_wp_cty", srid, schema
+    )
+
+
 # ---------------------------------------------------------------------------
 # Stage 2: wp_cty_cell — intersect wp_cty with grid cells
 # ---------------------------------------------------------------------------
@@ -1279,10 +1326,10 @@ def create_wp_cty_cell(con, job: SurrogateJob, schema: str = "public"):
         return
 
     if job.geom_family == "line":
-        if not job.has_filter:
+        if job.has_weight_attr and not job.has_filter:
             raise NotImplementedError(
-                "line geometry without filter is not yet supported in "
-                "create_wp_cty_cell"
+                "line geometry without filter and with weight attribute is "
+                "not yet supported in create_wp_cty_cell"
             )
         if job.has_weight_attr:
             _create_line_wa_wp_cty_cell(con, job, schema)
