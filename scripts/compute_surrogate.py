@@ -327,6 +327,11 @@ def ensure_columns(table_expr, table_name: str, required: list[str]):
         )
 
 
+def has_column(table_expr, column_name: str) -> bool:
+    """Return True when an ibis table expression exposes a column."""
+    return column_name in set(table_expr.schema().names)
+
+
 def ensure_geospatial_column(table_expr, table_name: str, column_name: str):
     """Raise a clear error if a column is not geospatial by ibis."""
     dtype = table_expr.schema()[column_name]
@@ -1111,7 +1116,11 @@ def build_line_no_wa_wp_cty_expr(con, job: SurrogateJob, schema: str):
 def build_line_no_wa_nofips_wp_cty_expr(con, job: SurrogateJob, schema: str):
     """Build Stage 1 for line sources that need data-boundary assignment."""
     data_t = load_table_expr(con, job.data_table, schema).alias("data")
-    weight_t = load_table_expr(con, job.weight_table, schema).alias("weight")
+    weight_t = apply_filter_function(
+        load_table_expr(con, job.weight_table, schema),
+        job.filter_function,
+        job.weight_table,
+    ).alias("weight")
     da = job.data_attribute
     geom = f"geom_{job.srid}"
 
@@ -1195,7 +1204,12 @@ def create_wp_cty(con, job: SurrogateJob, schema: str = "public"):
             _create_line_wa_wp_cty(con, job, schema)
             return
         if job.has_filter:
-            _create_line_no_wa_wp_cty(con, job, schema)
+            weight_t = load_table_expr(con, job.weight_table, schema)
+            if has_column(weight_t, job.data_attribute):
+                _create_line_no_wa_wp_cty(con, job, schema)
+                return
+
+            _create_line_no_wa_nofips_wp_cty(con, job, schema)
             return
         if job.has_weight_attr:
             raise NotImplementedError(

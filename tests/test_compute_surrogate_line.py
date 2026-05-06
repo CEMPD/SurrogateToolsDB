@@ -61,13 +61,34 @@ def make_line_no_ff_no_wa_nofips_job():
     )
 
 
+def make_line_ff_no_wa_nofips_job():
+    return compute_surrogate.SurrogateJob(
+        region="USA",
+        surrogate_code=280,
+        surrogate_name="Class 2 and 3 Railroad Miles",
+        data_table="county",
+        data_attribute="geoid",
+        weight_table="rail",
+        weight_attribute="",
+        weight_function="",
+        filter_function="mtfcc IN ('R1051','R1052')",
+        weight_geomtype="MultiLineString",
+        grid_name="us12k_516x444",
+        srid=900921,
+        output_dir="./outputs",
+        denominator_threshold=0.0005,
+    )
+
+
 def make_table_map(job):
     geom = f"geom_{job.srid}"
     weight_columns = {
         "moves2014": "int32",
         geom: dt.geometry,
     }
-    if job.has_filter or job.has_weight_attr or job.data_table == job.weight_table:
+    if job.filter_function and "mtfcc" in job.filter_function.lower():
+        weight_columns["mtfcc"] = "string"
+    if job.has_weight_attr or job.data_table == job.weight_table:
         weight_columns[job.data_attribute] = "string"
 
     wp_cty_columns = {
@@ -271,6 +292,34 @@ def test_build_line_no_wa_nofips_wp_cty_expr_uses_data_boundaries(monkeypatch):
     )
 
 
+def test_build_line_no_wa_nofips_wp_cty_expr_applies_filter(monkeypatch):
+    job = make_line_ff_no_wa_nofips_job()
+    table_map = make_table_map(job)
+    filter_calls = []
+
+    patch_load_table_expr(monkeypatch, table_map)
+    monkeypatch.setattr(
+        compute_surrogate,
+        "apply_filter_function",
+        lambda table_expr, filter_sql, table_name: (
+            filter_calls.append((filter_sql, table_name)) or table_expr
+        ),
+    )
+
+    expr = compute_surrogate.build_line_no_wa_nofips_wp_cty_expr(
+        object(),
+        job,
+        "public",
+    )
+
+    assert filter_calls == [(job.filter_function, job.weight_table)]
+    assert expr.schema().names == (
+        job.data_attribute,
+        "length_wp_cty",
+        f"geom_{job.srid}",
+    )
+
+
 def test_postprocess_line_output_refreshes_weighted_length_after_length():
     con = FakePostgresConnection()
 
@@ -377,6 +426,8 @@ def test_build_denom_expr_uses_line_length_wp_cty_without_filter(monkeypatch):
 
 def test_create_wp_cty_routes_line_filter_no_weight_attr(monkeypatch):
     calls = []
+    job = make_line_ff_no_wa_job()
+    patch_load_table_expr(monkeypatch, make_table_map(job))
 
     monkeypatch.setattr(
         compute_surrogate,
@@ -385,7 +436,6 @@ def test_create_wp_cty_routes_line_filter_no_weight_attr(monkeypatch):
     )
 
     con = object()
-    job = make_line_ff_no_wa_job()
     compute_surrogate.create_wp_cty(con, job, schema="custom")
 
     assert calls == [(con, 240, "custom")]
@@ -421,6 +471,23 @@ def test_create_wp_cty_routes_line_no_filter_no_weight_attr_nofips(monkeypatch):
     compute_surrogate.create_wp_cty(con, job, schema="custom")
 
     assert calls == [(con, 260, "custom")]
+
+
+def test_create_wp_cty_routes_line_filter_no_weight_attr_nofips(monkeypatch):
+    calls = []
+    job = make_line_ff_no_wa_nofips_job()
+    patch_load_table_expr(monkeypatch, make_table_map(job))
+
+    monkeypatch.setattr(
+        compute_surrogate,
+        "_create_line_no_wa_nofips_wp_cty",
+        lambda con, job, schema: calls.append((con, job.surrogate_code, schema)),
+    )
+
+    con = object()
+    compute_surrogate.create_wp_cty(con, job, schema="custom")
+
+    assert calls == [(con, 280, "custom")]
 
 
 def test_create_wp_cty_cell_routes_line_filter_no_weight_attr(monkeypatch):
