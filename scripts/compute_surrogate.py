@@ -443,6 +443,65 @@ def resolve_filter_column(table_expr, table_name: str, column_name: str):
     )
 
 
+def coerce_filter_operands(column, value):
+    """Match legacy Postgres casting for FILTER FUNCTION operands.
+
+    Why: shp2pgsql loads DBF columns as text, but legacy filters compare them
+    to numeric literals (e.g. `moves2014>1`). Postgres silently coerces; ibis
+    does not — so cast the column to the literal's type when they disagree.
+    """
+    if isinstance(value, bool):
+        return column, value
+
+    col_dtype = column.type()
+
+    if isinstance(value, int):
+        if col_dtype.is_string():
+            return column.cast("int64"), value
+        return column, value
+
+    if isinstance(value, float):
+        if col_dtype.is_string() or col_dtype.is_integer():
+            return column.cast("float64"), value
+        return column, value
+
+    if isinstance(value, str):
+        if col_dtype.is_numeric():
+            return column.cast("string"), value
+        return column, value
+
+    return column, value
+
+
+def coerce_filter_in_operands(column, values):
+    """`IN (...)` variant: coerce based on the widest literal type in the list."""
+    if not values:
+        return column, values
+
+    has_str = any(isinstance(v, str) and not isinstance(v, bool) for v in values)
+    has_float = any(isinstance(v, float) for v in values)
+    has_int = any(isinstance(v, int) and not isinstance(v, bool) for v in values)
+
+    col_dtype = column.type()
+
+    if has_str and not (has_float or has_int):
+        if col_dtype.is_numeric():
+            return column.cast("string"), values
+        return column, values
+
+    if has_float:
+        if col_dtype.is_string() or col_dtype.is_integer():
+            return column.cast("float64"), [float(v) for v in values]
+        return column, values
+
+    if has_int:
+        if col_dtype.is_string():
+            return column.cast("int64"), values
+        return column, values
+
+    return column, values
+
+
 class FilterParser:
     """Recursive-descent parser for the supported FILTER FUNCTION subset."""
 
@@ -513,10 +572,12 @@ class FilterParser:
             while self.match("COMMA"):
                 values.append(self.parse_literal())
             self.expect("RPAREN")
+            column, values = coerce_filter_in_operands(column, values)
             return column.isin(values)
 
         op_token = self.expect("OP")
         value = self.parse_literal()
+        column, value = coerce_filter_operands(column, value)
         return self.apply_comparison(column, op_token.value, value, op_token.pos)
 
     def parse_literal(self) -> Any:
